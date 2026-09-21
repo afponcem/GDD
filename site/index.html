@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Indicadores de Gestión GDD</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="viz-root" id="app">
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Indicadores de Gestión GDD</h1>
+      <p id="updated-at" class="muted">Cargando datos…</p>
+    </div>
+    <div class="topbar-controls">
+      <div class="view-toggle" role="tablist" aria-label="Vista">
+        <button class="view-btn active" data-view="weekly" role="tab" aria-selected="true">Semanal</button>
+        <button class="view-btn" data-view="ytd" role="tab" aria-selected="false">Acumulado (YTD)</button>
+      </div>
+      <button id="theme-toggle" class="icon-btn" title="Cambiar tema" aria-label="Cambiar tema claro/oscuro">◐</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <input id="entity-search" type="search" placeholder="Buscar territorio o subgerencia…" aria-label="Buscar entidad">
+    <input id="indicator-search" type="search" placeholder="Buscar indicador…" aria-label="Buscar indicador">
+    <div class="legend" aria-hidden="false">
+      <span class="legend-item"><span class="status-dot good"></span> ✓ Cumple</span>
+      <span class="legend-item"><span class="status-dot warning"></span> ! Alerta</span>
+      <span class="legend-item"><span class="status-dot critical"></span> ✕ Bajo meta</span>
+      <span class="legend-item"><span class="status-dot neutral"></span> Sin meta / sin dato</span>
+    </div>
+  </div>
+
+  <main id="table-wrap" class="table-wrap">
+    <p class="muted" id="status-msg">Cargando indicadores…</p>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

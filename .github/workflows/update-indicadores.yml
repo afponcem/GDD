@@ -1,0 +1,73 @@
+name: Actualizar indicadores y publicar sitio
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Chile continental usa UTC-3 (verano/DST, aprox. sep-abr) y UTC-4 (invierno).
+    # Se programan dos disparos en UTC para cubrir ambos casos; el paso
+    # "Verificar hora Chile" descarta la corrida que no corresponde, así el
+    # cron real siempre queda ~13:00 hora Chile sin mantener fechas de cambio
+    # de horario a mano.
+    - cron: "0 16 * * 1" # 13:00 CLT (UTC-3, horario de verano)
+    - cron: "0 17 * * 1" # 13:00 CLT (UTC-4, horario de invierno)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar hora Chile
+        id: check_time
+        run: |
+          hour=$(TZ="America/Santiago" date +%H)
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" != "13" ]; then
+            echo "Hora actual en Chile: $hour:xx — no son las 13:00, se omite esta corrida (la cubre el otro cron)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check_time.outputs.skip != 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.check_time.outputs.skip != 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        if: steps.check_time.outputs.skip != 'true'
+        run: pip install -r scripts/requirements.txt
+
+      - name: Descargar archivo desde SharePoint
+        if: steps.check_time.outputs.skip != 'true'
+        env:
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          SHAREPOINT_SITE_ID: ${{ secrets.SHAREPOINT_SITE_ID }}
+          SHAREPOINT_FILE_PATH: ${{ secrets.SHAREPOINT_FILE_PATH }}
+        run: python3 scripts/fetch_sharepoint.py /tmp/tablero.xlsx
+
+      - name: Parsear a JSON
+        if: steps.check_time.outputs.skip != 'true'
+        run: python3 scripts/parse_tablero.py /tmp/tablero.xlsx site/data/indicadores.json
+
+      - name: Preparar artefacto de Pages
+        if: steps.check_time.outputs.skip != 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Publicar en GitHub Pages
+        if: steps.check_time.outputs.skip != 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4
