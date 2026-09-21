@@ -10,14 +10,25 @@
     valueCellMarkup,
     escapeHtml,
     initThemeToggle,
+    createChecklistDropdown,
   } = window.GDD;
 
-  const FILTER_DIMS = ["territorio", "subgerencia", "agencia", "jefatura"];
+  // Dimensiones "de entidad" (filtran filas, en cascada Territorio ->
+  // Subgerencia -> Agencia -> Jefatura). "foco" filtra columnas de
+  // indicador, no filas — es independiente de la cascada, pero comparte el
+  // mismo componente de dropdown (checklist con buscador) por consistencia
+  // visual, así que vive en el mismo FILTER_DIMS para construirse/limpiarse/
+  // mostrar sus chips igual que las demás; donde SÍ importa la distinción
+  // (hasActiveFilter/nodeMatchesFilters, que deciden qué FILAS se ven) se
+  // usa ENTITY_FILTER_DIMS a propósito, sin "foco".
+  const ENTITY_FILTER_DIMS = ["territorio", "subgerencia", "agencia", "jefatura"];
+  const FILTER_DIMS = [...ENTITY_FILTER_DIMS, "foco"];
   const FILTER_LABELS = {
     territorio: "Territorio",
     subgerencia: "Subgerencia",
     agencia: "Agencia",
     jefatura: "Jefatura",
+    foco: "Foco",
   };
 
   const state = {
@@ -25,24 +36,21 @@
     // Árbol e indicadores fusionados (YTD + MTD en una sola estructura),
     // armados una vez al cargar los datos por buildCombinedData().
     combined: null,
+    indicatorsByKey: new Map(), // key -> indicador (para mirar su .foco al filtrar columnas)
     indicatorFilter: "",
     collapsed: null, // Set inicializado al cargar datos (colapsa territorios por defecto)
     // Cada dimensión es un array de códigos seleccionados (multi-select).
-    // Los filtros son concatenados: Territorio acota las opciones de
-    // Subgerencia/Agencia/Jefatura, Subgerencia acota Agencia/Jefatura, etc.
-    filters: { territorio: [], subgerencia: [], agencia: [], jefatura: [] },
+    // Los filtros de entidad son concatenados: Territorio acota las
+    // opciones de Subgerencia/Agencia/Jefatura, Subgerencia acota
+    // Agencia/Jefatura, etc. "foco" no tiene cascada (lista fija).
+    filters: { territorio: [], subgerencia: [], agencia: [], jefatura: [], foco: [] },
   };
 
-  // Estado de los dropdowns de filtro (independiente de qué esté seleccionado):
-  // qué panel está abierto y el texto de búsqueda escrito en cada uno.
-  const dropdownState = {
-    open: null,
-    search: { territorio: "", subgerencia: "", agencia: "", jefatura: "" },
-  };
   // Última lista de nodos disponibles (ya podada por la cascada) por dimensión,
   // para que los botones "Todos"/"Ninguno" y el buscador del panel no tengan
   // que recalcular el árbol.
-  const dropdownNodesCache = { territorio: [], subgerencia: [], agencia: [], jefatura: [] };
+  const dropdownNodesCache = { territorio: [], subgerencia: [], agencia: [], jefatura: [], foco: [] };
+  const dropdowns = {}; // dim -> instancia de createChecklistDropdown
 
   const tableWrap = document.getElementById("table-wrap");
   const updatedAtEl = document.getElementById("updated-at");
@@ -65,6 +73,7 @@
       const loaded = await loadCombinedData();
       state.data = loaded.data;
       state.combined = loaded.combined;
+      state.indicatorsByKey = new Map(state.combined.indicators.map((ind) => [ind.key, ind]));
       updatedAtEl.textContent = formatUpdatedAt(state.data.generated_at);
       resetCollapsedDefault();
       populateFilterOptions();
@@ -92,8 +101,13 @@
     });
 
     document.getElementById("clear-filters").addEventListener("click", () => {
+      // Muta cada array in-place (nunca reasignar state.filters[dim] = []):
+      // createChecklistDropdown guarda la referencia al array que le pasamos
+      // y solo la muta; reemplazarla la desincroniza silenciosamente del
+      // estado que lee el resto del código (el checkbox sigue viéndose
+      // marcado pero el filtro deja de aplicarse).
       FILTER_DIMS.forEach((dim) => {
-        state.filters[dim] = [];
+        state.filters[dim].length = 0;
       });
       populateFilterOptions();
       render();
@@ -153,175 +167,54 @@
       }
     });
     refreshFilterDropdown("jefatura", jefaturas);
+
+    // "Foco" no cuelga del árbol de entidades ni tiene cascada: es la lista
+    // fija de focos distintos entre los indicadores cargados.
+    const focos = [...new Set(state.combined.indicators.map((ind) => ind.foco).filter(Boolean))].map(
+      (foco) => ({ code: foco, name: foco })
+    );
+    refreshFilterDropdown("foco", focos);
   }
 
-  // --- Dropdown de filtro (checklist con buscador, "Todos"/"Ninguno") -----
+  // --- Dropdowns de filtro (checklist compartido, ver shared.js) ---------
 
   function buildFilterDropdowns() {
     const container = document.getElementById("filters-container");
     const clearBtn = document.getElementById("clear-filters");
 
     FILTER_DIMS.forEach((dim) => {
-      const wrap = document.createElement("div");
-      wrap.className = "filter-dropdown";
-      wrap.dataset.dim = dim;
-
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "filter-dropdown-toggle";
-      toggle.setAttribute("aria-haspopup", "true");
-      toggle.setAttribute("aria-expanded", "false");
-      toggle.innerHTML = `<span class="label">${FILTER_LABELS[dim]}</span><span class="caret">▾</span>`;
-      toggle.addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleDropdown(dim);
+      const dropdown = createChecklistDropdown({
+        dim,
+        label: FILTER_LABELS[dim],
+        selected: state.filters[dim],
+        // "foco" solo esconde/muestra columnas — no hace falta recalcular
+        // la cascada de entidades ni reconstruir toda la tabla, basta con
+        // re-aplicar el filtro de columnas (igual que el buscador de texto).
+        onSelectionChange:
+          dim === "foco"
+            ? () => {
+                applyIndicatorFilter();
+                renderActiveFilterChips();
+              }
+            : () => {
+                populateFilterOptions();
+                render();
+              },
       });
-
-      const panel = document.createElement("div");
-      panel.className = "filter-dropdown-panel";
-      panel.setAttribute("role", "group");
-      panel.setAttribute("aria-label", `Opciones de ${FILTER_LABELS[dim]}`);
-      panel.hidden = true;
-      panel.addEventListener("click", (e) => e.stopPropagation());
-
-      const search = document.createElement("input");
-      search.type = "search";
-      search.className = "filter-dropdown-search";
-      search.placeholder = `Buscar ${FILTER_LABELS[dim].toLowerCase()}…`;
-      search.addEventListener("input", (e) => {
-        dropdownState.search[dim] = e.target.value.trim().toLowerCase();
-        renderDropdownOptions(dim);
-      });
-
-      const actions = document.createElement("div");
-      actions.className = "filter-dropdown-actions";
-      const allBtn = document.createElement("button");
-      allBtn.type = "button";
-      allBtn.textContent = "Seleccionar todos";
-      allBtn.addEventListener("click", () => {
-        // Solo selecciona lo que el buscador del panel está mostrando en
-        // ese momento, no todo el universo de la dimensión — si el usuario
-        // filtró por texto antes de apretar "Seleccionar todos", esperaría
-        // que solo se marque lo que ve.
-        state.filters[dim] = visibleDropdownNodes(dim).map((n) => n.code);
-        populateFilterOptions();
-        render();
-      });
-      const noneBtn = document.createElement("button");
-      noneBtn.type = "button";
-      noneBtn.textContent = "Deseleccionar";
-      noneBtn.addEventListener("click", () => {
-        state.filters[dim] = [];
-        populateFilterOptions();
-        render();
-      });
-      actions.appendChild(allBtn);
-      actions.appendChild(noneBtn);
-
-      const options = document.createElement("div");
-      options.className = "filter-dropdown-options";
-
-      panel.appendChild(search);
-      panel.appendChild(actions);
-      panel.appendChild(options);
-      wrap.appendChild(toggle);
-      wrap.appendChild(panel);
-      container.insertBefore(wrap, clearBtn);
+      dropdowns[dim] = dropdown;
+      container.insertBefore(dropdown.element, clearBtn);
     });
-
-    document.addEventListener("click", () => closeAllDropdowns());
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeAllDropdowns();
-    });
-  }
-
-  function toggleDropdown(dim) {
-    const isOpen = dropdownState.open === dim;
-    closeAllDropdowns();
-    if (!isOpen) {
-      dropdownState.open = dim;
-      const wrap = document.querySelector(`.filter-dropdown[data-dim="${dim}"]`);
-      wrap.classList.add("open");
-      wrap.querySelector(".filter-dropdown-panel").hidden = false;
-      wrap.querySelector(".filter-dropdown-toggle").setAttribute("aria-expanded", "true");
-    }
-  }
-
-  function closeAllDropdowns() {
-    dropdownState.open = null;
-    document.querySelectorAll(".filter-dropdown").forEach((wrap) => {
-      wrap.classList.remove("open");
-      wrap.querySelector(".filter-dropdown-panel").hidden = true;
-      wrap.querySelector(".filter-dropdown-toggle").setAttribute("aria-expanded", "false");
-    });
-  }
-
-  function visibleDropdownNodes(dim) {
-    const search = dropdownState.search[dim];
-    return (dropdownNodesCache[dim] || [])
-      .filter((n) => !search || n.name.toLowerCase().includes(search))
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name, "es"));
   }
 
   function refreshFilterDropdown(dim, nodes) {
     dropdownNodesCache[dim] = nodes;
-
-    // Poda del propio state: una selección que la cascada dejó fuera (ej. se
-    // cambió Territorio y esa Subgerencia ya no pertenece) se descarta.
-    const validCodes = new Set(nodes.map((n) => n.code));
-    const kept = state.filters[dim].filter((v) => validCodes.has(v));
-    state.filters[dim].length = 0;
-    state.filters[dim].push(...kept);
-
-    const wrap = document.querySelector(`.filter-dropdown[data-dim="${dim}"]`);
-    const toggle = wrap.querySelector(".filter-dropdown-toggle");
-    const count = state.filters[dim].length;
-    const badge = count > 0 ? `<span class="count-badge">${count}</span>` : "";
-    toggle.querySelector(".label").outerHTML = `<span class="label">${FILTER_LABELS[dim]}</span>${badge}`;
-
-    renderDropdownOptions(dim);
-  }
-
-  function renderDropdownOptions(dim) {
-    const wrap = document.querySelector(`.filter-dropdown[data-dim="${dim}"]`);
-    const optionsEl = wrap.querySelector(".filter-dropdown-options");
-    const nodes = visibleDropdownNodes(dim);
-
-    optionsEl.innerHTML = "";
-    if (!nodes.length) {
-      const empty = document.createElement("div");
-      empty.className = "filter-dropdown-empty";
-      empty.textContent = "Sin opciones disponibles.";
-      optionsEl.appendChild(empty);
-      return;
-    }
-
-    nodes.forEach((n) => {
-      const optionLabel = document.createElement("label");
-      optionLabel.className = "filter-dropdown-option";
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = state.filters[dim].includes(n.code);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) {
-          if (!state.filters[dim].includes(n.code)) state.filters[dim].push(n.code);
-        } else {
-          state.filters[dim] = state.filters[dim].filter((c) => c !== n.code);
-        }
-        populateFilterOptions();
-        render();
-      });
-      const text = document.createElement("span");
-      text.textContent = n.name;
-      optionLabel.appendChild(checkbox);
-      optionLabel.appendChild(text);
-      optionsEl.appendChild(optionLabel);
-    });
+    dropdowns[dim].refresh(nodes);
   }
 
   function hasActiveFilter() {
-    return FILTER_DIMS.some((dim) => state.filters[dim].length > 0);
+    // "foco" filtra columnas, no filas — no debe forzar la expansión total
+    // del árbol ni el mensaje de "sin resultados" que usan las 4 de entidad.
+    return ENTITY_FILTER_DIMS.some((dim) => state.filters[dim].length > 0);
   }
 
   function nodeMatchesFilters(node, path) {
@@ -351,7 +244,9 @@
         removeBtn.textContent = "✕";
         removeBtn.setAttribute("aria-label", `Quitar filtro ${FILTER_LABELS[dim]}: ${label}`);
         removeBtn.addEventListener("click", () => {
-          state.filters[dim] = state.filters[dim].filter((v) => v !== code);
+          // In-place: ver comentario en el handler de "Limpiar todo".
+          const idx = state.filters[dim].indexOf(code);
+          if (idx !== -1) state.filters[dim].splice(idx, 1);
           populateFilterOptions();
           render();
         });
@@ -568,7 +463,10 @@
     groupHeaders.forEach((th) => {
       const key = th.dataset.indicatorKey;
       const label = th.textContent.toLowerCase();
-      const matches = !state.indicatorFilter || label.includes(state.indicatorFilter);
+      const ind = state.indicatorsByKey.get(key);
+      const matchesText = !state.indicatorFilter || label.includes(state.indicatorFilter);
+      const matchesFoco = state.filters.foco.length === 0 || (ind && state.filters.foco.includes(ind.foco));
+      const matches = matchesText && matchesFoco;
       // Un mismo data-indicator-key marca el th de grupo (fila 1), los 2 th
       // de subcolumna YTD/MTD (fila 2) y las 2 td por fila del cuerpo — se
       // ocultan todos juntos.

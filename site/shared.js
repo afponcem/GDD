@@ -24,6 +24,7 @@ window.GDD = (function () {
       return {
         key,
         label: indicatorsMap.get(key),
+        foco: (w && w.foco) || (y && y.foco) || null,
         metaYtd: y ? y.meta : undefined,
         metaMtd: w ? w.meta : undefined,
         fechaYtd: y ? y.fecha_corte : undefined,
@@ -220,6 +221,180 @@ window.GDD = (function () {
     return combinedDataPromise;
   }
 
+  // --- Dropdown de filtro reutilizable (checklist con buscador, "Todos"/
+  // "Ninguno") --------------------------------------------------------------
+  // Usado tanto por la tabla completa (Territorio/Subgerencia/Agencia/
+  // Jefatura/Foco) como por Mi vista (Foco): antes vivía duplicado en
+  // app.js y mi-vista.js.
+  //
+  // La lista de opciones y el estado de selección son responsabilidad del
+  // que llama: `selected` es un array que este componente muta in-place
+  // (push/splice), nunca lo reemplaza, para que quien lo posea (ej.
+  // `state.filters.foco`) siga viendo los cambios sin tener que releerlo.
+  const openChecklistDropdowns = new Set();
+  let checklistGlobalListenersBound = false;
+
+  function closeAllChecklistDropdowns() {
+    openChecklistDropdowns.forEach((close) => close());
+    openChecklistDropdowns.clear();
+  }
+
+  function bindChecklistGlobalListenersOnce() {
+    if (checklistGlobalListenersBound) return;
+    checklistGlobalListenersBound = true;
+    document.addEventListener("click", () => closeAllChecklistDropdowns());
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAllChecklistDropdowns();
+    });
+  }
+
+  function createChecklistDropdown({ dim, label, selected, onSelectionChange }) {
+    bindChecklistGlobalListenersOnce();
+    let nodesCache = [];
+    let searchText = "";
+
+    const wrap = document.createElement("div");
+    wrap.className = "filter-dropdown";
+    wrap.dataset.dim = dim;
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "filter-dropdown-toggle";
+    toggle.setAttribute("aria-haspopup", "true");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.innerHTML = `<span class="label">${label}</span><span class="caret">▾</span>`;
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (wrap.classList.contains("open")) close();
+      else open();
+    });
+
+    const panel = document.createElement("div");
+    panel.className = "filter-dropdown-panel";
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", `Opciones de ${label}`);
+    panel.hidden = true;
+    panel.addEventListener("click", (e) => e.stopPropagation());
+
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "filter-dropdown-search";
+    search.placeholder = `Buscar ${label.toLowerCase()}…`;
+    search.addEventListener("input", (e) => {
+      searchText = e.target.value.trim().toLowerCase();
+      renderOptions();
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "filter-dropdown-actions";
+    const allBtn = document.createElement("button");
+    allBtn.type = "button";
+    allBtn.textContent = "Seleccionar todos";
+    allBtn.addEventListener("click", () => {
+      // Solo selecciona lo que el buscador del panel está mostrando en ese
+      // momento, no todo el universo de la dimensión.
+      const visible = visibleNodes();
+      selected.length = 0;
+      selected.push(...visible.map((n) => n.code));
+      refresh(nodesCache);
+      onSelectionChange();
+    });
+    const noneBtn = document.createElement("button");
+    noneBtn.type = "button";
+    noneBtn.textContent = "Deseleccionar";
+    noneBtn.addEventListener("click", () => {
+      selected.length = 0;
+      refresh(nodesCache);
+      onSelectionChange();
+    });
+    actions.appendChild(allBtn);
+    actions.appendChild(noneBtn);
+
+    const options = document.createElement("div");
+    options.className = "filter-dropdown-options";
+
+    panel.appendChild(search);
+    panel.appendChild(actions);
+    panel.appendChild(options);
+    wrap.appendChild(toggle);
+    wrap.appendChild(panel);
+
+    function open() {
+      closeAllChecklistDropdowns();
+      wrap.classList.add("open");
+      panel.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      openChecklistDropdowns.add(close);
+    }
+
+    function close() {
+      wrap.classList.remove("open");
+      panel.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+      openChecklistDropdowns.delete(close);
+    }
+
+    function visibleNodes() {
+      return nodesCache
+        .filter((n) => !searchText || n.name.toLowerCase().includes(searchText))
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, "es"));
+    }
+
+    function renderOptions() {
+      const nodes = visibleNodes();
+      options.innerHTML = "";
+      if (!nodes.length) {
+        const empty = document.createElement("div");
+        empty.className = "filter-dropdown-empty";
+        empty.textContent = "Sin opciones disponibles.";
+        options.appendChild(empty);
+        return;
+      }
+      nodes.forEach((n) => {
+        const optionLabel = document.createElement("label");
+        optionLabel.className = "filter-dropdown-option";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = selected.includes(n.code);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) {
+            if (!selected.includes(n.code)) selected.push(n.code);
+          } else {
+            const idx = selected.indexOf(n.code);
+            if (idx !== -1) selected.splice(idx, 1);
+          }
+          onSelectionChange();
+        });
+        const text = document.createElement("span");
+        text.textContent = n.name;
+        optionLabel.appendChild(checkbox);
+        optionLabel.appendChild(text);
+        options.appendChild(optionLabel);
+      });
+    }
+
+    function refresh(nodes) {
+      nodesCache = nodes;
+      // Poda in-place: una selección que ya no está entre las opciones
+      // disponibles (ej. cambió el Territorio y esa Subgerencia dejó de
+      // pertenecer) se descarta, sin reemplazar el array (el que llama
+      // sigue con la misma referencia).
+      const validCodes = new Set(nodes.map((n) => n.code));
+      const kept = selected.filter((v) => validCodes.has(v));
+      selected.length = 0;
+      selected.push(...kept);
+
+      const count = selected.length;
+      const badge = count > 0 ? `<span class="count-badge">${count}</span>` : "";
+      toggle.querySelector(".label").outerHTML = `<span class="label">${label}</span>${badge}`;
+
+      renderOptions();
+    }
+
+    return { element: wrap, refresh };
+  }
+
   // Toggle de tema claro/oscuro — un solo botón #theme-toggle compartido por
   // todas las pestañas/páginas de la app, así que se inicializa una sola vez
   // (si cada módulo de pestaña le agregara su propio listener, un clic
@@ -254,5 +429,7 @@ window.GDD = (function () {
     loadIndicadoresData,
     loadCombinedData,
     initThemeToggle,
+    createChecklistDropdown,
+    closeAllChecklistDropdowns,
   };
 })();

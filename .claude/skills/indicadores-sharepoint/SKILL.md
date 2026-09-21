@@ -171,6 +171,43 @@ solo MTD) en vez de fusionada en una. No se ha visto en los archivos reales
 probados hasta ahora, pero si aparece una fila "duplicada" con datos a
 medias, es la primera hipótesis a revisar.
 
+## Cruce Indicador -> Foco (hoja "Definiciones Indicadores")
+
+Cada indicador se etiqueta con su "Foco" (categoría: Captación, Gestión
+Preventiva, Procesos Regulatorios, Fidelización, Productos y Servicios) para
+poder filtrar por foco en el sitio. Esa info vive en la hoja **"Definiciones
+Indicadores"** (columna B = Foco, columna C = Indicador), pero el texto de
+esa hoja **no calza carácter a carácter** con los nombres canónicos de
+Resumen: numeración propia distinta ("05. IPC Fuera de plazo" vs "IPC
+FUERA DE PLAZO"), singular/plural distinto ("Agente" vs "Agentes"),
+puntuación distinta ("Vigilancia ambiental - Agente Foco" vs "Vigilancia
+Ambiental (Agentes Foco)").
+
+`build_indicator_focos` en `scripts/parse_tablero.py` cruza ambos por
+niveles de confianza decrecientes (`_match_score`): igualdad exacta >
+substring contiguo > solapamiento de la mayoría de las palabras (ese último
+nivel existe para los casos de singular/plural o puntuación, pero por sí
+solo es ambiguo — ver el caso "Accidentes CTP" a continuación). Probado
+contra el archivo real: 100% de los indicadores de ambas hojas Resumen
+quedan con foco asignado.
+
+**Ojo con la ambigüedad de "Accidentes CTP" vs "Accidentes (vista de
+gestión)":** por solapamiento de palabras, el indicador "Accidentes CTP
+(Vista de gestión)" calzaría igual de bien con la fila de Definiciones de
+"Accidentes CTP" que con la de "Accidentes (vista de gestión)" (comparten
+casi todas las palabras). El desempate por **substring contiguo** es lo que
+evita elegir mal: "ACCIDENTES CTP" aparece tal cual dentro del nombre del
+indicador, "ACCIDENTES VISTA DE GESTION" no (queda cortado por el "CTP" en
+el medio). Si se toca `_match_score`, correr
+`tests/test_parse_tablero.py::test_build_indicator_focos_disambiguates_substring_candidates`
+para no reintroducir este error.
+
+Un indicador que no calza con ninguna fila de Definiciones queda con
+`foco: null` en el JSON — no se inventa la categoría. Si en algún archivo
+futuro aparece un indicador sin foco, la hoja "Definiciones Indicadores" es
+lo primero a revisar (puede que el indicador sea nuevo y aún no esté
+documentado ahí).
+
 ## Automatización semanal
 
 El parser **no invoca un LLM** — es determinístico y corre solo en

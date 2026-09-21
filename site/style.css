@@ -17,6 +17,8 @@
   --status-warning: #fab219;
   --status-critical: #d03b3b;
   --status-neutral: #898781;
+  --row-zebra: rgba(11, 11, 11, 0.025);
+  --row-hover: rgba(42, 120, 214, 0.10);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -35,6 +37,8 @@
     --status-warning: #fab219;
     --status-critical: #e66767;
     --status-neutral: #898781;
+    --row-zebra: rgba(255, 255, 255, 0.025);
+    --row-hover: rgba(57, 135, 229, 0.16);
   }
 }
 :root[data-theme="dark"] .viz-root {
@@ -52,6 +56,8 @@
   --status-warning: #fab219;
   --status-critical: #e66767;
   --status-neutral: #898781;
+  --row-zebra: rgba(255, 255, 255, 0.025);
+  --row-hover: rgba(57, 135, 229, 0.16);
 }
 
 * { box-sizing: border-box; }
@@ -434,6 +440,15 @@ td.entity-col, th.entity-col {
   background: var(--surface-1);
   text-align: left;
   font-variant-numeric: normal;
+  width: 320px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* white-space: nowrap ya viene de la regla general th/td — sin truncar
+     acá, un nombre largo se sale de esta celda "flotando" sobre las
+     columnas de indicadores que quedan scrolleadas debajo (bug reportado:
+     se ve el nombre superpuesto con los valores al desplazar a la
+     derecha). El nombre completo sigue disponible en el title del <td>. */
 }
 
 tr.level-total td.entity-col { font-weight: 700; }
@@ -441,6 +456,22 @@ tr.level-territorio td.entity-col { font-weight: 600; padding-left: 24px; }
 tr.level-subgerencia td.entity-col { padding-left: 44px; color: var(--text-secondary); }
 tr.level-agencia td.entity-col { padding-left: 44px; color: var(--text-secondary); font-style: italic; }
 tr.level-jefatura td.entity-col { padding-left: 64px; color: var(--text-muted); font-size: 12px; }
+
+/* Ayuda a seguir una fila horizontalmente en pantallas altas con muchas
+   filas: una franja cebra sutil siempre visible, más un resaltado más
+   fuerte al pasar el cursor (toda la fila, incluida la columna fija). */
+tbody tr:nth-child(even) td {
+  background: var(--row-zebra);
+}
+tbody tr:nth-child(even) td.entity-col {
+  background: linear-gradient(var(--row-zebra), var(--row-zebra)), var(--surface-1);
+}
+tbody tr:hover td {
+  background: var(--row-hover);
+}
+tbody tr:hover td.entity-col {
+  background: linear-gradient(var(--row-hover), var(--row-hover)), var(--surface-1);
+}
 
 .entity-toggle {
   background: none;

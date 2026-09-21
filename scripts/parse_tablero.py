@@ -61,6 +61,11 @@ RAW_YTD_CODE_COL = 4    # columna D: código de persona (o de agencia, en sus fi
 RAW_YTD_AGENCIA_COL = 6  # columna F: nombre de agencia (solo presente en alguna de las 3 filas REAL/META/CUMP de la persona)
 RAW_YTD_LABEL_COL = 8    # columna H: "REAL" / "META" / "CUMP"
 
+# Columnas de "Definiciones Indicadores" usadas para el vínculo Indicador -> Foco.
+DEFINICIONES_SHEET = "Definiciones Indicadores"
+DEFINICIONES_FOCO_COL = 2       # columna B
+DEFINICIONES_INDICADOR_COL = 3  # columna C
+
 
 def slugify(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
@@ -137,6 +142,87 @@ def build_jefatura_agencia_tags(wb):
             continue
         tags.setdefault(str(code).strip(), str(tag).strip())
     return tags
+
+
+def _normalize_for_match(text) -> str:
+    """Normaliza un nombre de indicador para cruzarlo entre hojas: saca el
+    prefijo numérico ("05. "), tildes, y reemplaza toda la puntuación por
+    espacios (a diferencia de normalize_name, que no toca la puntuación —
+    acá hace falta para poder comparar substrings/palabras sueltas)."""
+    text = re.sub(r"^\s*\d+\.\s*", "", str(text))
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^A-Za-z0-9]+", " ", text).upper().strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _singularize_tokens(norm: str) -> set:
+    return {t[:-1] if len(t) > 3 and t.endswith("S") else t for t in norm.split()}
+
+
+def _match_score(a_norm: str, b_norm: str):
+    """Nivel de confianza del cruce entre dos nombres de indicador ya
+    normalizados, de más a menos confiable: (0) igualdad exacta, (1) uno es
+    substring contiguo del otro, (2) solapan casi todas las palabras (sin
+    ser substring — cubre diferencias de plural/singular o puntuación
+    distinta). None si no calzan de ninguna forma. El substring contiguo
+    (tier 1) es clave para desambiguar casos como "Accidentes CTP" vs
+    "Accidentes (vista de gestión)" que por solapamiento de palabras
+    (tier 2) calzarían con cualquiera de las dos filas de Definiciones."""
+    if a_norm == b_norm:
+        return (0, len(b_norm))
+    if a_norm in b_norm or b_norm in a_norm:
+        return (1, len(b_norm))
+    ta, tb = _singularize_tokens(a_norm), _singularize_tokens(b_norm)
+    small, big = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    if small and len(small & big) / len(small) >= 0.8:
+        return (2, len(b_norm))
+    return None
+
+
+def build_indicator_focos(wb, indicator_labels):
+    """Cruza la hoja "Definiciones Indicadores" (columnas Foco/Indicador) con
+    los nombres canónicos de indicador de las hojas Resumen, para poder
+    filtrar por Foco en el sitio.
+
+    El texto de esa hoja no calza carácter a carácter con los nombres
+    canónicos (numeración de indicador propia, singular/plural distinto,
+    puntuación distinta: "Vigilancia ambiental - Agente Foco" en
+    Definiciones vs "Vigilancia Ambiental (Agentes Foco)" en Resumen), así
+    que el cruce usa niveles de confianza decrecientes (ver `_match_score`)
+    y, entre varios candidatos del mismo nivel, se queda con el texto de
+    Definiciones más largo (más específico). Un indicador que no calza con
+    ninguna fila queda sin foco — no se inventa la categoría.
+    """
+    if DEFINICIONES_SHEET not in wb.sheetnames:
+        return {}
+    ws = wb[DEFINICIONES_SHEET]
+
+    rows = []
+    for r in range(1, ws.max_row + 1):
+        foco = ws.cell(row=r, column=DEFINICIONES_FOCO_COL).value
+        indicador = ws.cell(row=r, column=DEFINICIONES_INDICADOR_COL).value
+        if not foco or not indicador:
+            continue
+        if str(foco).strip() == "Foco" and str(indicador).strip() == "Indicador":
+            continue  # fila de encabezado, no de datos
+        foco_clean = re.sub(r"^\s*\d+\.\s*", "", str(foco)).strip()
+        rows.append((foco_clean, _normalize_for_match(indicador)))
+
+    focos = {}
+    for label in indicator_labels:
+        label_norm = _normalize_for_match(label)
+        best = None  # (tier, -largo, foco) — el mínimo gana: tier más chico,
+        # y a igual tier, el texto de Definiciones más largo (más específico)
+        for foco_clean, ind_norm in rows:
+            score = _match_score(label_norm, ind_norm)
+            if score is None:
+                continue
+            candidate = (score[0], -score[1], foco_clean)
+            if best is None or candidate < best:
+                best = candidate
+        if best is not None:
+            focos[slugify(label)] = best[2]
+    return focos
 
 
 def parse_summary_sheet(ws):
@@ -344,11 +430,21 @@ def parse_workbook(xlsx_path: Path) -> dict:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_file": xlsx_path.name,
     }
+    sheets = {}
+    all_labels = {}
     for out_key, sheet_name in SHEET_CONFIGS.items():
         if sheet_name not in wb.sheetnames:
             raise KeyError(f"No se encontró la hoja '{sheet_name}' en {xlsx_path}")
         tree, indicators, agencias_by_name = parse_summary_sheet(wb[sheet_name])
         nest_agencias(tree, jefatura_tags, agencias_by_name)
+        sheets[out_key] = (tree, indicators)
+        for key, meta in indicators.items():
+            all_labels[key] = meta["label"]
+
+    focos = build_indicator_focos(wb, all_labels.values())
+    for out_key, (tree, indicators) in sheets.items():
+        for key, meta in indicators.items():
+            meta["foco"] = focos.get(key)
         result[out_key] = {"hierarchy": tree, "indicators": indicators}
 
     return result

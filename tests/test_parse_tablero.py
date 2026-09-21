@@ -13,6 +13,7 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from parse_tablero import (  # noqa: E402
+    build_indicator_focos,
     build_jefatura_agencia_tags,
     nest_agencias,
     parse_summary_sheet,
@@ -192,7 +193,60 @@ def test_slugify_handles_accents_and_punctuation():
     assert slugify("  Cobertura RC (M+)  ") == "cobertura_rc_m"
 
 
+def build_definiciones_fixture(wb):
+    """Reproduce el layout real de "Definiciones Indicadores": col B = Foco
+    (con prefijo numérico), col C = Indicador (numeración propia, texto que
+    NO calza carácter a carácter con el nombre canónico de Resumen)."""
+    ws = wb.create_sheet("Definiciones Indicadores")
+    ws.cell(row=2, column=2, value="Foco")
+    ws.cell(row=2, column=3, value="Indicador")
+    ws.cell(row=3, column=2, value="1. Captación")
+    ws.cell(row=3, column=3, value="1. Captación")
+    # Focos DISTINTOS a propósito para estas dos filas, aunque en el archivo
+    # real ambas caen en "Gestión Preventiva" — así el test detecta si el
+    # desempate por substring contiguo (tier 1) elige mal y "sube" al
+    # solapamiento de palabras (tier 2), que calzaría con cualquiera de
+    # las dos indistintamente.
+    ws.cell(row=4, column=2, value="2. Gestión Preventiva")
+    ws.cell(row=4, column=3, value="01. Accidentes (vista de gestión)")
+    ws.cell(row=5, column=2, value="3. Procesos Regulatorios")
+    ws.cell(row=5, column=3, value="02. Accidentes CTP")
+    ws.cell(row=6, column=2, value="2. Gestión Preventiva")
+    ws.cell(row=6, column=3, value="11. Vigilancia ambiental - Agente Foco")
+    return ws
+
+
+def test_build_indicator_focos_disambiguates_substring_candidates():
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    build_definiciones_fixture(wb)
+
+    # "Accidentes CTP (Vista de gestión)" comparte casi todas las palabras
+    # con la fila "01. Accidentes (vista de gestión)" (solapamiento de
+    # tokens calzaría con cualquiera de las dos), pero solo "02. Accidentes
+    # CTP" es substring contiguo de su nombre -> debe ganar esa, no la otra.
+    labels = [
+        "CAPTACIÓN TOTAL",
+        "Accidentes (vista de gestión)",
+        "Accidentes CTP (Vista de gestión)",
+        "Vigilancia Ambiental (Agentes Foco)",  # plural/puntuación distinta -> matchea por solape de palabras
+        "Indicador Sin Match En Definiciones",
+    ]
+    focos = build_indicator_focos(wb, labels)
+
+    assert focos[slugify("CAPTACIÓN TOTAL")] == "Captación"
+    assert focos[slugify("Accidentes (vista de gestión)")] == "Gestión Preventiva"
+    # Debe ganar "02. Accidentes CTP" (substring contiguo, tier 1), no
+    # "01. Accidentes (vista de gestión)" (solo solapamiento de palabras,
+    # tier 2) — si el desempate estuviera mal, este assert fallaría con
+    # "Gestión Preventiva" en vez de "Procesos Regulatorios".
+    assert focos[slugify("Accidentes CTP (Vista de gestión)")] == "Procesos Regulatorios"
+    assert focos[slugify("Vigilancia Ambiental (Agentes Foco)")] == "Gestión Preventiva"
+    assert slugify("Indicador Sin Match En Definiciones") not in focos
+
+
 if __name__ == "__main__":
     test_parses_hierarchy_with_closing_markers_and_agencias()
     test_slugify_handles_accents_and_punctuation()
+    test_build_indicator_focos_disambiguates_substring_candidates()
     print("OK: todos los tests pasaron")

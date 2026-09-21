@@ -11,6 +11,7 @@
     safeGet,
     safeSet,
     initThemeToggle,
+    createChecklistDropdown,
   } = window.GDD;
 
   const STORAGE_KEY = "gdd-my-entity-code";
@@ -20,7 +21,10 @@
     combined: null,
     entityIndex: [], // lista plana {code, name, level, breadcrumb, node}
     selected: null, // entrada de entityIndex actualmente elegida
+    focoFilter: [], // focos elegidos (vacío = todos) — filtra las tarjetas, no la entidad
   };
+
+  let focoDropdown = null;
 
   const myView = document.getElementById("my-view");
   const updatedAtEl = document.getElementById("updated-at");
@@ -42,6 +46,7 @@
       state.combined = loaded.combined;
       state.entityIndex = flattenEntities(state.combined.hierarchy);
       updatedAtEl.textContent = formatUpdatedAt(state.data.generated_at);
+      buildFocoDropdown();
 
       const savedCode = safeGet(STORAGE_KEY);
       const saved = savedCode && state.entityIndex.find((e) => e.code === savedCode);
@@ -79,6 +84,25 @@
     });
 
     document.getElementById("entity-change").addEventListener("click", showPicker);
+  }
+
+  function buildFocoDropdown() {
+    const container = document.getElementById("mivista-filters-container");
+    if (!container) return;
+    const focos = [...new Set(state.combined.indicators.map((ind) => ind.foco).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "es"))
+      .map((foco) => ({ code: foco, name: foco }));
+
+    focoDropdown = createChecklistDropdown({
+      dim: "foco",
+      label: "Foco",
+      selected: state.focoFilter,
+      onSelectionChange: () => {
+        if (state.selected) renderMyView(state.selected.node);
+      },
+    });
+    container.appendChild(focoDropdown.element);
+    focoDropdown.refresh(focos);
   }
 
   function showPicker() {
@@ -141,12 +165,22 @@
   }
 
   function renderMyView(node) {
-    const indicators = state.combined.indicators;
+    const indicators = state.focoFilter.length
+      ? state.combined.indicators.filter((ind) => state.focoFilter.includes(ind.foco))
+      : state.combined.indicators;
     myView.innerHTML = "";
     renderSummary(node, indicators);
 
     const grid = document.createElement("div");
     grid.className = "stat-grid";
+
+    if (!indicators.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "Ningún indicador calza con el foco seleccionado.";
+      myView.appendChild(empty);
+      return;
+    }
 
     indicators.forEach((ind) => {
       grid.appendChild(buildStatTile(ind, node));
