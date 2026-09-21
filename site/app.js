@@ -1,6 +1,18 @@
 (function () {
   "use strict";
 
+  const {
+    buildCombinedData,
+    walkTree,
+    levelLabel,
+    formatUpdatedAt,
+    formatPercent,
+    valueCellMarkup,
+    escapeHtml,
+    safeGet,
+    safeSet,
+  } = window.GDD;
+
   const FILTER_DIMS = ["territorio", "subgerencia", "agencia", "jefatura"];
   const FILTER_LABELS = {
     territorio: "Territorio",
@@ -66,62 +78,6 @@
     });
   }
 
-  // --- Fusión de las vistas Semanal (MTD) y Acumulado (YTD) en un solo árbol ---
-  // Cada nodo fusionado guarda valuesYtd/valuesMtd por separado en vez de
-  // un único `values`, y los hijos se unen por código (unión, no intersección
-  // — si una entidad solo existe en una de las dos hojas, igual aparece,
-  // con la otra columna en blanco).
-  function buildCombinedData(weekly, ytd) {
-    const indicatorsMap = new Map();
-    [weekly.indicators, ytd.indicators].forEach((catalog) => {
-      Object.entries(catalog || {}).forEach(([key, meta]) => {
-        if (!indicatorsMap.has(key)) indicatorsMap.set(key, meta.label);
-      });
-    });
-    const indicators = [...indicatorsMap.keys()].map((key) => {
-      const w = weekly.indicators[key];
-      const y = ytd.indicators[key];
-      return {
-        key,
-        label: indicatorsMap.get(key),
-        metaYtd: y ? y.meta : undefined,
-        metaMtd: w ? w.meta : undefined,
-        fechaYtd: y ? y.fecha_corte : undefined,
-        fechaMtd: w ? w.fecha_corte : undefined,
-      };
-    });
-
-    return { hierarchy: mergeHierarchyNode(weekly.hierarchy, ytd.hierarchy), indicators };
-  }
-
-  function mergeHierarchyNode(weeklyNode, ytdNode) {
-    const base = weeklyNode || ytdNode;
-    const node = {
-      code: base.code,
-      name: base.name,
-      level: base.level,
-      valuesYtd: (ytdNode && ytdNode.values) || {},
-      valuesMtd: (weeklyNode && weeklyNode.values) || {},
-      children: [],
-    };
-
-    const wChildren = (weeklyNode && weeklyNode.children) || [];
-    const yChildren = (ytdNode && ytdNode.children) || [];
-    const yByCode = new Map(yChildren.map((c) => [c.code, c]));
-    const usedYtdCodes = new Set();
-    const pairs = wChildren.map((wc) => {
-      const yc = yByCode.get(wc.code) || null;
-      if (yc) usedYtdCodes.add(wc.code);
-      return [wc, yc];
-    });
-    yChildren.forEach((yc) => {
-      if (!usedYtdCodes.has(yc.code)) pairs.push([null, yc]);
-    });
-
-    node.children = pairs.map(([wc, yc]) => mergeHierarchyNode(wc, yc));
-    return node;
-  }
-
   function bindControls() {
     document.getElementById("indicator-search").addEventListener("input", (e) => {
       state.indicatorFilter = e.target.value.trim().toLowerCase();
@@ -145,41 +101,6 @@
       document.documentElement.setAttribute("data-theme", next);
       safeSet("gdd-theme", next);
     });
-  }
-
-  function formatUpdatedAt(iso) {
-    if (!iso) return "";
-    try {
-      const d = new Date(iso);
-      const fmt = new Intl.DateTimeFormat("es-CL", {
-        dateStyle: "long",
-        timeStyle: "short",
-        timeZone: "America/Santiago",
-      });
-      return `Actualizado: ${fmt.format(d)} (hora Chile)`;
-    } catch {
-      return `Actualizado: ${iso}`;
-    }
-  }
-
-  // --- Recorrido del árbol con "path" jerárquico por nodo -----------------
-  // path.territorio / .subgerencia / .agencia / .jefatura llevan el código
-  // del ancestro de ese nivel, cuando existe. Agencia solo hereda
-  // territorio (la planilla no liga Agencia -> Subgerencia); Jefatura
-  // hereda Subgerencia cuando cuelga de una, o solo Territorio si es un
-  // cargo a nivel territorial.
-  function walkTree(root, visit) {
-    const step = (node, depth, path, parent) => {
-      const nextPath = { ...path };
-      if (node.level === "territorio") nextPath.territorio = node.code;
-      else if (node.level === "subgerencia") nextPath.subgerencia = node.code;
-      else if (node.level === "agencia") nextPath.agencia = node.code;
-      else if (node.level === "jefatura") nextPath.jefatura = node.code;
-
-      visit(node, depth, nextPath, parent);
-      (node.children || []).forEach((child) => step(child, depth + 1, nextPath, node));
-    };
-    step(root, 0, {}, null);
   }
 
   function matchesSelection(value, selected) {
@@ -527,11 +448,6 @@
     return `level-${node.level}`;
   }
 
-  function levelLabel(node) {
-    return { total: "Total", territorio: "Territorio", subgerencia: "Subgerencia", agencia: "Agencia", jefatura: "Jefatura" }[
-      node.level
-    ] || node.level;
-  }
 
   function buildHead(indicators) {
     const thead = document.createElement("thead");
@@ -643,38 +559,8 @@
   function buildCell(value, meta) {
     const wrap = document.createElement("span");
     wrap.className = "cell-inner";
-
-    if (value === undefined || value === null) {
-      wrap.innerHTML = `<span class="status-icon neutral">·</span><span>—</span>`;
-      return wrap;
-    }
-
-    const hasNumericMeta = typeof meta === "number" && meta > 0;
-    if (!hasNumericMeta || typeof value !== "number") {
-      wrap.innerHTML = `<span class="status-icon neutral">·</span><span>${escapeHtml(
-        formatRaw(value)
-      )}</span>`;
-      return wrap;
-    }
-
-    const ratio = value / meta;
-    const status = ratio >= 1 ? "good" : ratio >= 0.8 ? "warning" : "critical";
-    const icon = status === "good" ? "✓" : status === "warning" ? "!" : "✕";
-    wrap.innerHTML = `<span class="status-icon ${status}">${icon}</span><span>${formatPercent(
-      value
-    )}</span>`;
+    wrap.innerHTML = valueCellMarkup(value, meta);
     return wrap;
-  }
-
-  function formatRaw(value) {
-    if (typeof value === "number") {
-      return Number.isInteger(value) ? String(value) : value.toFixed(2);
-    }
-    return String(value);
-  }
-
-  function formatPercent(value) {
-    return `${(value * 100).toFixed(1)}%`;
   }
 
   function applyIndicatorFilter() {
@@ -699,28 +585,4 @@
     return window.CSS && CSS.escape ? CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
   }
 
-  function escapeHtml(str) {
-    return str.replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    }[c]));
-  }
-
-  function safeGet(key) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  }
-  function safeSet(key, value) {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-      /* ignore */
-    }
-  }
 })();
