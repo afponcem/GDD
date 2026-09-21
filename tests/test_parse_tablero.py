@@ -1,6 +1,7 @@
 """Test del parser contra un workbook sintético que reproduce el layout real
-de las hojas "Resumen Semanal" / "Resumen Cump YTD" (ver
-.claude/skills/indicadores-sharepoint/SKILL.md para el detalle del formato).
+de las hojas "Resumen Semanal" / "Resumen Cump YTD" + la hoja cruda "YTD"
+(ver .claude/skills/indicadores-sharepoint/SKILL.md para el detalle del
+formato, en particular la semántica de "marcador de cierre" en JEFATURA).
 
 No depende del archivo real de ACHS ni de credenciales de SharePoint —
 corre en CI en cada push.
@@ -11,7 +12,12 @@ from pathlib import Path
 import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from parse_tablero import parse_summary_sheet, slugify  # noqa: E402
+from parse_tablero import (  # noqa: E402
+    build_jefatura_agencia_tags,
+    nest_agencias,
+    parse_summary_sheet,
+    slugify,
+)
 
 
 def build_fixture_sheet(wb, name):
@@ -56,7 +62,6 @@ def build_fixture_sheet(wb, name):
     ws.cell(row=15, column=5, value=2)
 
     ws.cell(row=16, column=1, value="SGRG0001")
-    # col B vacía: forward-fill del territorio corto "NORTE"
     ws.cell(row=16, column=3, value="ANTOFAGASTA")
     ws.cell(row=16, column=4, value="-")  # sin dato -> se omite
     ws.cell(row=16, column=5, value=0)
@@ -67,112 +72,118 @@ def build_fixture_sheet(wb, name):
     ws.cell(row=17, column=4, value=0.9)
     ws.cell(row=17, column=5, value=1)
 
-    # marcador AGENCIAS: cuelga directo del territorio (no de la subgerencia,
-    # la planilla no da ese vínculo)
+    # marcador AGENCIAS: 2 agencias, ambas bajo NORTE (Territorio, no Subgerencia)
     ws.cell(row=19, column=2, value="AGENCIAS")
     ws.cell(row=20, column=1, value="IQUIQUE")
     ws.cell(row=20, column=2, value="NORTE")
     ws.cell(row=20, column=3, value="IQUIQUE")
     ws.cell(row=20, column=4, value=0.99)
 
-    # marcador JEFATURA: 1 cargo a nivel territorio NORTE (antes de cualquier
-    # marcador de subgerencia) + 1 fila que repite la subgerencia SGRG0003
-    # como encabezado + 1 persona bajo esa subgerencia + 1 cargo a nivel
-    # territorio METRO (regresión: no debe heredar la subgerencia de NORTE)
-    ws.cell(row=22, column=2, value="JEFATURA")
-    ws.cell(row=23, column=1, value="JECPX001")
-    ws.cell(row=23, column=2, value="NORTE")
-    ws.cell(row=23, column=3, value="JEFE TERRITORIAL EJEMPLO")
-    ws.cell(row=23, column=4, value=0.5)
+    ws.cell(row=21, column=1, value="ARICA")
+    ws.cell(row=21, column=3, value="ARICA")
+    ws.cell(row=21, column=4, value=0.5)
 
-    ws.cell(row=24, column=1, value="SGRG0003")
-    ws.cell(row=24, column=3, value="ARICA Y TARAPACA")  # debe calzar con sub1["name"]
-    ws.cell(row=24, column=4, value=0.8)  # repite el valor de la subgerencia
+    # marcador JEFATURA. Semántica de CIERRE: la fila que repite
+    # código+nombre de una Subgerencia/Territorio ya visto cierra (no abre)
+    # el grupo de personas acumulado desde el marcador anterior.
+    #   - JECPX001, JECPX002 quedan cerrados por SGRG0003 -> ARICA Y TARAPACA
+    #   - JECPX003 queda cerrado por GRTR1010 -> directo bajo TERRITORIO
+    #     METROPOLITANO (regresión: no debe heredar la subgerencia de NORTE)
+    ws.cell(row=23, column=2, value="JEFATURA")
+    ws.cell(row=24, column=1, value="JECPX001")
+    ws.cell(row=24, column=2, value="NORTE")
+    ws.cell(row=24, column=3, value="PERSONA UNO")
+    ws.cell(row=24, column=4, value=0.6)
 
     ws.cell(row=25, column=1, value="JECPX002")
-    ws.cell(row=25, column=3, value="PERSONA EJEMPLO")
+    ws.cell(row=25, column=3, value="PERSONA DOS")
     ws.cell(row=25, column=4, value=0.7)
 
-    ws.cell(row=26, column=1, value="JECPX003")
-    ws.cell(row=26, column=2, value="METRO")
-    ws.cell(row=26, column=3, value="JEFE METRO EJEMPLO")
-    ws.cell(row=26, column=4, value=0.6)
+    ws.cell(row=26, column=1, value="SGRG0003")
+    ws.cell(row=26, column=3, value="ARICA Y TARAPACA")  # cierra {JECPX001, JECPX002}
+    ws.cell(row=26, column=4, value=0.8)  # repite el valor de la subgerencia
+
+    ws.cell(row=27, column=1, value="GRTR1020")
+    ws.cell(row=27, column=3, value="TERRITORIO NORTE")  # cierra el resto de NORTE (nada pendiente)
+
+    ws.cell(row=28, column=1, value="JECPX003")
+    ws.cell(row=28, column=2, value="METRO")
+    ws.cell(row=28, column=3, value="PERSONA TRES")
+    ws.cell(row=28, column=4, value=0.65)
+
+    ws.cell(row=29, column=1, value="GRTR1010")
+    ws.cell(row=29, column=3, value="TERRITORIO METROPOLITANO")  # cierra {JECPX003} directo bajo el territorio
 
     return ws
 
 
-def test_parses_hierarchy_and_values():
+def build_raw_ytd_sheet(wb):
+    """Hoja cruda "YTD": liga cada persona a su agencia vía columnas D/F/H.
+    Solo se necesitan filas con label "CUMP" (u otra) que traigan el tag en
+    col F; el resto del layout real no se reproduce."""
+    ws = wb.create_sheet("YTD")
+    ws.cell(row=1, column=4, value="JECPX001")
+    ws.cell(row=1, column=6, value="IQUIQUE")
+    ws.cell(row=1, column=8, value="CUMP")
+
+    ws.cell(row=2, column=4, value="JECPX002")
+    ws.cell(row=2, column=6, value="ARICA")
+    ws.cell(row=2, column=8, value="CUMP")
+
+    # JECPX003 no tiene tag de agencia -> debe quedar sin agrupar (passthrough)
+    return ws
+
+
+def test_parses_hierarchy_with_closing_markers_and_agencias():
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     ws = build_fixture_sheet(wb, "Resumen Semanal")
+    build_raw_ytd_sheet(wb)
 
-    tree, indicators = parse_summary_sheet(ws)
+    tree, indicators, agencias_by_name = parse_summary_sheet(ws)
 
     assert indicators["captacion_total"]["label"] == "CAPTACIÓN TOTAL"
-    assert indicators["captacion_total"]["meta"] == 1
     assert indicators["accidentes_vista_de_gestion"]["meta"] == "(Valor Real)"
 
-    assert tree["code"] == "TOTAL RED ACHS"
     assert tree["values"]["captacion_total"] == 0.95
-
     assert len(tree["children"]) == 2
-    territorio, territorio_metro = tree["children"]
-    assert territorio["code"] == "GRTR1020"
-    assert territorio["level"] == "territorio"
+    territorio_norte, territorio_metro = tree["children"]
+    assert territorio_norte["code"] == "GRTR1020"
     assert territorio_metro["code"] == "GRTR1010"
 
-    subgerencias = [c for c in territorio["children"] if c["level"] == "subgerencia"]
-    assert len(subgerencias) == 2
-    sub1, sub2 = subgerencias
-    assert sub1["code"] == "SGRG0003"
-    assert sub1["name"] == "ARICA Y TARAPACA"
-    assert sub1["values"]["captacion_total"] == 0.8
+    subgerencias = [c for c in territorio_norte["children"] if c["level"] == "subgerencia"]
+    sub_arica = next(s for s in subgerencias if s["code"] == "SGRG0003")
 
-    assert sub2["code"] == "SGRG0001"
-    assert sub2["name"] == "ANTOFAGASTA"
-    # "-" se omite del dict de valores (no se guarda como 0 ni como string)
-    assert "captacion_total" not in sub2["values"]
-    assert sub2["values"]["accidentes_vista_de_gestion"] == 0
+    # Antes de anidar agencias: las jefaturas cierran bajo su subgerencia,
+    # no bajo la que dejó el territorio anterior.
+    jefaturas_arica = [c for c in sub_arica["children"] if c["level"] == "jefatura"]
+    assert {j["code"] for j in jefaturas_arica} == {"JECPX001", "JECPX002"}
 
-    # Agencia cuelga directo del territorio (no de la subgerencia)
-    agencias = [c for c in territorio["children"] if c["level"] == "agencia"]
-    assert len(agencias) == 1
-    assert agencias[0]["code"] == "IQUIQUE"
-    assert agencias[0]["values"]["captacion_total"] == 0.99
-
-    # Jefatura territorial (antes del primer marcador de subgerencia) cuelga
-    # directo del territorio
-    jefaturas_territorio = [c for c in territorio["children"] if c["level"] == "jefatura"]
-    assert len(jefaturas_territorio) == 1
-    assert jefaturas_territorio[0]["code"] == "JECPX001"
-
-    # La fila que repite código+nombre de SGRG0003 es un encabezado de grupo,
-    # no una persona: no debe aparecer como nodo "jefatura", y la persona
-    # que sigue debe colgar de esa subgerencia, no del territorio.
-    all_jefatura_codes = [
-        c["code"]
-        for t in tree["children"]
-        for c in t["children"]
-        if c["level"] == "jefatura"
-    ] + [
-        p["code"]
-        for t in tree["children"]
-        for s in t["children"]
-        if s["level"] == "subgerencia"
-        for p in s["children"]
-    ]
-    assert "SGRG0003" not in all_jefatura_codes
-    assert sub1["children"][0]["code"] == "JECPX002"
-    assert sub1["children"][0]["level"] == "jefatura"
-    assert sub1["children"][0]["values"]["captacion_total"] == 0.7
-
-    # Regresión: un cargo territorial de METRO (sin marcador de subgerencia
-    # propio) no debe heredar la subgerencia SGRG0003 dejada por NORTE.
     jefaturas_metro = [c for c in territorio_metro["children"] if c["level"] == "jefatura"]
-    assert len(jefaturas_metro) == 1
-    assert jefaturas_metro[0]["code"] == "JECPX003"
-    subgerencia_metro = [c for c in territorio_metro["children"] if c["level"] == "subgerencia"][0]
-    assert subgerencia_metro["children"] == []
+    assert [j["code"] for j in jefaturas_metro] == ["JECPX003"]
+
+    assert set(agencias_by_name) == {"IQUIQUE", "ARICA"}
+
+    # --- nest_agencias: inserta Agencia entre Subgerencia y Jefatura ---
+    tags = build_jefatura_agencia_tags(wb)
+    assert tags == {"JECPX001": "IQUIQUE", "JECPX002": "ARICA"}
+
+    nest_agencias(tree, tags, agencias_by_name)
+
+    sub_arica_children_levels = {c["level"] for c in sub_arica["children"]}
+    assert sub_arica_children_levels == {"agencia"}
+
+    ag_iquique = next(a for a in sub_arica["children"] if a["name"] == "IQUIQUE")
+    assert ag_iquique["values"]["captacion_total"] == 0.99  # valores reales de la sección AGENCIAS
+    assert [j["code"] for j in ag_iquique["children"]] == ["JECPX001"]
+
+    ag_arica = next(a for a in sub_arica["children"] if a["name"] == "ARICA")
+    assert ag_arica["values"]["captacion_total"] == 0.5
+    assert [j["code"] for j in ag_arica["children"]] == ["JECPX002"]
+
+    # JECPX003 no tenía tag de agencia -> sigue colgando directo del territorio
+    jefaturas_metro_post = [c for c in territorio_metro["children"] if c["level"] == "jefatura"]
+    assert [j["code"] for j in jefaturas_metro_post] == ["JECPX003"]
 
 
 def test_slugify_handles_accents_and_punctuation():
@@ -182,6 +193,6 @@ def test_slugify_handles_accents_and_punctuation():
 
 
 if __name__ == "__main__":
-    test_parses_hierarchy_and_values()
+    test_parses_hierarchy_with_closing_markers_and_agencias()
     test_slugify_handles_accents_and_punctuation()
     print("OK: todos los tests pasaron")

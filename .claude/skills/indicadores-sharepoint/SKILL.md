@@ -60,8 +60,8 @@ Hojas ignoradas por completo: `Hoja1` (notas sueltas sin estructura).
   - Fila 8: fila `TOTAL RED ACHS` (col A = código, col B = nombre, resto = valores). Es la raíz del árbol.
   - Marcador `TERRITORIO` en columna B (col A vacía) → siguen filas de territorio: col A = código (`GRTR10xx`), col B = nombre.
   - Marcador `SUBGERENCIA` en columna B → siguen filas de subgerencia: col A = código (`SGRGxxxx`), col B = nombre corto del territorio padre (**solo en la primera fila de cada grupo** — hay que hacer forward-fill), col C = nombre de la subgerencia.
-  - Marcador `AGENCIAS` en columna B → siguen filas de agencia: col A = código/nombre, col B = nombre corto del territorio padre (forward-fill, igual que en `SUBGERENCIA`), col C = nombre de la agencia. **Ojo:** esta sección solo liga Agencia → Territorio. La planilla **no da el código de Subgerencia intermedio**, así que el parser cuelga la agencia directo del territorio (nivel `"agencia"`), no de la subgerencia — anidarla ahí sería inventar un vínculo que el archivo no tiene.
-  - Marcador `JEFATURA` en columna B → siguen filas de persona (nivel `"jefatura"`). A diferencia de Agencia, acá sí hay vínculo con Subgerencia: dentro de esta sección aparecen filas que **repiten el código y nombre exactos de una fila de `SUBGERENCIA`** (mismo `SGRGxxxx`, mismo nombre en col C, mismo valor agregado) — son encabezados de grupo, no personas. El parser las detecta comparando código+nombre contra las subgerencias ya vistas (`subgerencias_by_code`) y usa esa fila como "subgerencia actual" para las personas que siguen, hasta el próximo encabezado. Las primeras filas de la sección (antes de cualquier encabezado de subgerencia) son cargos a nivel territorial y cuelgan directo del territorio.
+  - Marcador `AGENCIAS` en columna B → siguen filas de agencia: col A = código/nombre, col B = nombre corto del territorio padre (forward-fill, igual que en `SUBGERENCIA`), col C = nombre de la agencia. Esta sección por sí sola solo liga Agencia → Territorio (no da el código de Subgerencia intermedio) — el vínculo real con Subgerencia se obtiene cruzando con la hoja cruda `YTD` (ver más abajo).
+  - Marcador `JEFATURA` en columna B → siguen filas de persona (nivel `"jefatura"`). **Ojo con la semántica**: dentro de esta sección aparecen filas que repiten el código+nombre exactos de una fila ya vista de `SUBGERENCIA` o de `TERRITORIO` (mismo `SGRGxxxx`/`GRTRxxxx`, mismo nombre, mismo valor agregado) — **estas filas CIERRAN el grupo de personas que viene ANTES, no abren el que sigue después**. Es decir, es un patrón de "subtotal al final del grupo", no de encabezado. El parser acumula personas en un buffer y lo vacía (asignándolo a esa Subgerencia o Territorio) recién al toparse con la fila de cierre. **Este fue un bug real en una versión anterior del parser** — se verificó contra un caso real del usuario (Subgerencia "Metro Centro", agencia "Santiago" con 3 personas) que solo se explica con esta dirección.
   - Valor `-` en una celda de indicador significa "sin dato" (se omite en el JSON, no se guarda como 0).
 
 El nombre corto de territorio en las filas de subgerencia/agencia (`NORTE`/`METRO`/`SUR`)
@@ -70,11 +70,43 @@ no calza textualmente con el nombre completo del territorio (`TERRITORIO NORTE`,
 `TERRITORIO_SHORT_NAME_MAP` dentro de `scripts/parse_tablero.py` — **si ACHS
 renombra un territorio, hay que actualizar ese diccionario**.
 
-El árbol resultante queda asimétrico a propósito: `Territorio → Subgerencia →
-Jefatura` por un lado, y `Territorio → Agencia` por otro (Agencia y
-Subgerencia son ramas paralelas bajo el mismo Territorio, no una anidada en
-la otra). Si en algún momento ACHS agrega una columna o fila que sí ligue
-Agencia con Subgerencia, vale la pena revisar si conviene re-anidar.
+## El vínculo Jefatura -> Agencia (hoja cruda "YTD")
+
+Ninguna hoja "Resumen ..." liga una persona con su agencia. Ese vínculo solo
+existe en la hoja cruda **`YTD`** (el detalle mensual por persona, distinta
+de `Resumen Cump YTD`), en un patrón de 3 filas por persona (REAL/META/CUMP):
+
+- Columna D: código de la persona (ej. `JECP4101`), igual en las 3 filas.
+- Columna F: nombre de la agencia — pero **no siempre en la misma de las 3
+  filas** (a veces en la fila REAL, a veces en la CUMP). Hay que escanear
+  las 3 y quedarse con la primera no vacía (`build_jefatura_agencia_tags`
+  hace esto).
+- Columna H: la etiqueta `REAL` / `META` / `CUMP`.
+
+Con ese mapeo (`código_persona -> nombre_agencia`), `nest_agencias` reordena
+el árbol ya parseado: agrupa las jefaturas de cada Subgerencia por nombre de
+agencia, y si ese nombre calza (normalizado, sin tildes) con un nodo ya
+parseado en la sección `AGENCIAS` de la propia hoja Resumen, lo reutiliza
+(con sus valores reales de cumplimiento) como nodo intermedio
+`Subgerencia -> Agencia -> Jefatura`. El árbol final queda así **sí**
+anidado en 4 niveles.
+
+Dos casos no calzan y quedan documentados, no son bugs:
+- **Zonas combinadas**: una persona puede estar a cargo de una zona que
+  junta 2 agencias (ej. tag `"ARICA-IQUIQUE"`) que en la sección `AGENCIAS`
+  existen por separado (`ARICA`, `IQUIQUE`). Ahí se crea un nodo Agencia
+  liviano con ese nombre combinado pero **sin valores propios** (no hay un
+  % de cumplimiento agregado para esa combinación en el archivo) — la fila
+  igual sirve para filtrar/drill-down, solo sin número al lado.
+- **Agencias sin jefatura asociada** (o cuyo tag no calzó con ninguna): se
+  dejan como respaldo colgando directo del Territorio, como en la versión
+  anterior del parser.
+
+Si en algún momento la hoja cruda `YTD` cambia de layout (columnas
+corridas, patrón de 3 filas distinto), `build_jefatura_agencia_tags` es lo
+primero que hay que revisar — sin este cruce, el árbol sigue funcionando
+pero Agencia vuelve a quedar como rama plana bajo Territorio en vez de
+anidada bajo Subgerencia.
 
 ## Cómo regenerar/extender el parser
 

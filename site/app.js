@@ -1,12 +1,23 @@
 (function () {
   "use strict";
 
+  const FILTER_DIMS = ["territorio", "subgerencia", "agencia", "jefatura"];
+  const FILTER_LABELS = {
+    territorio: "Territorio",
+    subgerencia: "Subgerencia",
+    agencia: "Agencia",
+    jefatura: "Jefatura",
+  };
+
   const state = {
     data: null,
     view: "weekly",
     indicatorFilter: "",
     collapsed: null, // Set inicializado al cargar datos (colapsa territorios por defecto)
-    filters: { territorio: "", subgerencia: "", agencia: "", jefatura: "" },
+    // Cada dimensión es un array de códigos seleccionados (multi-select).
+    // Los filtros son concatenados: Territorio acota las opciones de
+    // Subgerencia/Agencia/Jefatura, Subgerencia acota Agencia/Jefatura, etc.
+    filters: { territorio: [], subgerencia: [], agencia: [], jefatura: [] },
   };
 
   const tableWrap = document.getElementById("table-wrap");
@@ -62,34 +73,22 @@
       applyIndicatorFilter();
     });
 
-    document.getElementById("filter-territorio").addEventListener("change", (e) => {
-      state.filters.territorio = e.target.value;
-      // Subgerencia/Agencia son hijos de Territorio: al cambiarlo, sus
-      // opciones se recalculan y una selección que ya no pertenezca al
-      // territorio elegido se limpia (si no, quedan dos filtros que nunca
-      // pueden calzar a la vez y la tabla muestra "sin resultados" sin
-      // explicación).
-      populateFilterOptions();
-      state.filters.subgerencia = document.getElementById("filter-subgerencia").value;
-      state.filters.agencia = document.getElementById("filter-agencia").value;
-      render();
-    });
-    ["subgerencia", "agencia"].forEach((dim) => {
+    FILTER_DIMS.forEach((dim) => {
       document.getElementById(`filter-${dim}`).addEventListener("change", (e) => {
-        state.filters[dim] = e.target.value;
+        state.filters[dim] = [...e.target.selectedOptions].map((o) => o.value);
+        // Cambiar un filtro más "arriba" en la jerarquía recalcula las
+        // opciones de los de abajo (cascada) y descarta selecciones que ya
+        // no pertenezcan a lo elegido, para que nunca queden dos filtros
+        // que no puedan calzar a la vez.
+        populateFilterOptions();
         render();
       });
     });
-    document.getElementById("filter-jefatura").addEventListener("input", (e) => {
-      state.filters.jefatura = e.target.value.trim().toLowerCase();
-      render();
-    });
     document.getElementById("clear-filters").addEventListener("click", () => {
-      state.filters = { territorio: "", subgerencia: "", agencia: "", jefatura: "" };
-      document.getElementById("filter-territorio").value = "";
-      document.getElementById("filter-subgerencia").value = "";
-      document.getElementById("filter-agencia").value = "";
-      document.getElementById("filter-jefatura").value = "";
+      FILTER_DIMS.forEach((dim) => {
+        state.filters[dim] = [];
+      });
+      populateFilterOptions();
       render();
     });
 
@@ -139,53 +138,72 @@
     step(root, 0, {}, null);
   }
 
+  function matchesSelection(value, selected) {
+    return selected.length === 0 || (value !== undefined && selected.includes(value));
+  }
+
   function populateFilterOptions() {
     const viewData = state.data[state.view];
     if (!viewData) return;
 
-    const territorioFilter = state.filters.territorio;
-    const territorios = [];
-    const subgerencias = [];
-    const agencias = [];
-    const jefaturas = [];
+    const f = state.filters;
 
-    // Subgerencia y Agencia se acotan al territorio elegido (cascada), para
-    // que no queden dos selects que nunca puedan calzar a la vez.
-    walkTree(viewData.hierarchy, (node, depth, path) => {
+    // Filtros concatenados en cascada, en 4 pasadas secuenciales: cada
+    // dimensión se calcula (y su selección se poda) usando ya el estado
+    // PODADO de la dimensión anterior — si se calcularan las 4 en una sola
+    // pasada, un filtro hijo que quedó obsoleto (ej. una Subgerencia que ya
+    // no pertenece al Territorio recién elegido) seguiría filtrando de más
+    // durante ese mismo render, dejando Agencia/Jefatura vacíos por error.
+    const territorios = [];
+    walkTree(viewData.hierarchy, (node) => {
       if (node.level === "territorio") territorios.push(node);
-      if (node.level === "subgerencia" && (!territorioFilter || path.territorio === territorioFilter)) {
+    });
+    fillMultiSelect("filter-territorio", territorios, f.territorio);
+
+    const subgerencias = [];
+    walkTree(viewData.hierarchy, (node, depth, path) => {
+      if (node.level === "subgerencia" && matchesSelection(path.territorio, f.territorio)) {
         subgerencias.push(node);
       }
-      if (node.level === "agencia" && (!territorioFilter || path.territorio === territorioFilter)) {
+    });
+    fillMultiSelect("filter-subgerencia", subgerencias, f.subgerencia);
+
+    const agencias = [];
+    walkTree(viewData.hierarchy, (node, depth, path) => {
+      if (
+        node.level === "agencia" &&
+        matchesSelection(path.territorio, f.territorio) &&
+        matchesSelection(path.subgerencia, f.subgerencia)
+      ) {
         agencias.push(node);
       }
-      if (node.level === "jefatura") jefaturas.push(node);
     });
+    fillMultiSelect("filter-agencia", agencias, f.agencia);
 
-    fillSelect("filter-territorio", territorios, "Todos");
-    fillSelect("filter-subgerencia", subgerencias, "Todas");
-    fillSelect("filter-agencia", agencias, "Todas");
-
-    const datalist = document.getElementById("jefatura-options");
-    datalist.innerHTML = "";
-    jefaturas
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name, "es"))
-      .forEach((j) => {
-        const opt = document.createElement("option");
-        opt.value = j.name;
-        datalist.appendChild(opt);
-      });
+    const jefaturas = [];
+    walkTree(viewData.hierarchy, (node, depth, path) => {
+      if (
+        node.level === "jefatura" &&
+        matchesSelection(path.territorio, f.territorio) &&
+        matchesSelection(path.subgerencia, f.subgerencia) &&
+        matchesSelection(path.agencia, f.agencia)
+      ) {
+        jefaturas.push(node);
+      }
+    });
+    fillMultiSelect("filter-jefatura", jefaturas, f.jefatura);
   }
 
-  function fillSelect(id, nodes, placeholderLabel) {
+  function fillMultiSelect(id, nodes, selectedValues) {
     const select = document.getElementById(id);
-    const current = select.value;
+    const validCodes = new Set(nodes.map((n) => n.code));
+    // Poda del propio state: una selección que la cascada dejó fuera (ej. se
+    // cambió Territorio y esa Subgerencia ya no pertenece) se descarta.
+    const kept = selectedValues.filter((v) => validCodes.has(v));
+    selectedValues.length = 0;
+    selectedValues.push(...kept);
+
     select.innerHTML = "";
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = placeholderLabel;
-    select.appendChild(placeholder);
     nodes
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name, "es"))
@@ -193,30 +211,51 @@
         const opt = document.createElement("option");
         opt.value = n.code;
         opt.textContent = n.name;
+        opt.selected = selectedValues.includes(n.code);
         select.appendChild(opt);
       });
-    select.value = current && [...select.options].some((o) => o.value === current) ? current : "";
   }
 
   function hasActiveFilter() {
-    return Boolean(
-      state.filters.territorio ||
-        state.filters.subgerencia ||
-        state.filters.agencia ||
-        state.filters.jefatura
-    );
+    return FILTER_DIMS.some((dim) => state.filters[dim].length > 0);
   }
 
   function nodeMatchesFilters(node, path) {
     const f = state.filters;
-    if (f.territorio && path.territorio !== f.territorio) return false;
-    if (f.subgerencia && path.subgerencia !== f.subgerencia) return false;
-    if (f.agencia && path.agencia !== f.agencia) return false;
-    if (f.jefatura) {
-      if (node.level !== "jefatura") return false;
-      if (!node.name.toLowerCase().includes(f.jefatura)) return false;
+    if (!matchesSelection(path.territorio, f.territorio)) return false;
+    if (!matchesSelection(path.subgerencia, f.subgerencia)) return false;
+    if (!matchesSelection(path.agencia, f.agencia)) return false;
+    if (f.jefatura.length) {
+      if (node.level !== "jefatura" || !f.jefatura.includes(node.code)) return false;
     }
     return true;
+  }
+
+  function renderActiveFilterChips() {
+    const container = document.getElementById("active-filters");
+    container.innerHTML = "";
+    FILTER_DIMS.forEach((dim) => {
+      const select = document.getElementById(`filter-${dim}`);
+      state.filters[dim].forEach((code) => {
+        const option = [...select.options].find((o) => o.value === code);
+        const label = option ? option.textContent : code;
+        const chip = document.createElement("span");
+        chip.className = "filter-chip";
+        const text = document.createElement("span");
+        text.textContent = `${FILTER_LABELS[dim]}: ${label}`;
+        chip.appendChild(text);
+        const removeBtn = document.createElement("button");
+        removeBtn.textContent = "✕";
+        removeBtn.setAttribute("aria-label", `Quitar filtro ${FILTER_LABELS[dim]}: ${label}`);
+        removeBtn.addEventListener("click", () => {
+          state.filters[dim] = state.filters[dim].filter((v) => v !== code);
+          populateFilterOptions();
+          render();
+        });
+        chip.appendChild(removeBtn);
+        container.appendChild(chip);
+      });
+    });
   }
 
   function render() {
@@ -246,6 +285,7 @@
     }
     tableWrap.appendChild(table);
     applyIndicatorFilter();
+    renderActiveFilterChips();
   }
 
   function buildVisibleRows(root) {
