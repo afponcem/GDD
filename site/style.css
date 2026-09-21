@@ -451,6 +451,18 @@ td.entity-col, th.entity-col {
      derecha). El nombre completo sigue disponible en el title del <td>. */
 }
 
+/* Las celdas <td> dentro de una tabla pintan sus fondos/contenido según el
+   algoritmo de "table background layers" (CSS2.1 §17.5.1), que NO sigue el
+   mismo orden que el stacking context normal: una celda position:sticky sin
+   z-index explícito puede terminar pintándose DEBAJO del contenido de una
+   celda hermana no posicionada (p.ej. el círculo de .status-icon de la
+   celda de valor siguiente), aunque en pantalla ambas ocupen el mismo
+   rectángulo tras el scroll horizontal. Forzar z-index acá evita que ese
+   contenido se "filtre" sobre la columna fija. */
+td.entity-col {
+  z-index: 1;
+}
+
 tr.level-total td.entity-col { font-weight: 700; }
 tr.level-territorio td.entity-col { font-weight: 600; padding-left: 24px; }
 tr.level-subgerencia td.entity-col { padding-left: 44px; color: var(--text-secondary); }

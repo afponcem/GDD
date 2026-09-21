@@ -49,6 +49,19 @@ TERRITORIO_SHORT_NAME_MAP = {
     "SUR": "TERRITORIO SUR",
 }
 
+# La hoja "Definiciones Indicadores" agrupa estos indicadores bajo el foco
+# "4. Fidelización", pero en la práctica pertenecen al sub-grupo "Modelo
+# Cultura y Experiencia" (MCE) y así se quieren filtrar en el sitio. Se
+# aplica como override manual sobre el resultado de build_indicator_focos
+# (por slug de indicador) en vez de tocar el matching automático, porque acá
+# no hay ambigüedad de texto que resolver: es una reclasificación editorial.
+FOCO_OVERRIDES = {
+    "dialogo_diario_equipo_al_dia": "MCE (Modelo Cultura y Experiencia)",
+    "confirmacion_de_procesos": "MCE (Modelo Cultura y Experiencia)",
+    "uso_aoa_fisico": "MCE (Modelo Cultura y Experiencia)",
+    "uso_aoa_digital_integrado": "MCE (Modelo Cultura y Experiencia)",
+}
+
 HEADER_ROW_DIRTY = 3
 HEADER_ROW_CANON = 4
 FECHA_CORTE_ROW = 5
@@ -444,7 +457,7 @@ def parse_workbook(xlsx_path: Path) -> dict:
     focos = build_indicator_focos(wb, all_labels.values())
     for out_key, (tree, indicators) in sheets.items():
         for key, meta in indicators.items():
-            meta["foco"] = focos.get(key)
+            meta["foco"] = FOCO_OVERRIDES.get(key, focos.get(key))
         result[out_key] = {"hierarchy": tree, "indicators": indicators}
 
     return result
