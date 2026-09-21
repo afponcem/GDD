@@ -83,6 +83,71 @@ window.GDD = (function () {
     step(root, 0, {}, null);
   }
 
+  // --- Filtros en cascada Territorio -> Subgerencia -> Agencia -> Jefatura
+  // (usado tanto por la Tabla completa, para acotar filas, como por Mi
+  // vista, para acotar el buscador de entidad) -------------------------------
+
+  function matchesSelection(value, selected) {
+    return selected.length === 0 || (value !== undefined && selected.includes(value));
+  }
+
+  // Recalcula, en 4 pasadas secuenciales, las opciones disponibles de cada
+  // dimensión dado el estado (ya podado) de las anteriores: si se hicieran
+  // en una sola pasada, un filtro hijo obsoleto (ej. una Subgerencia que dejó
+  // de pertenecer al Territorio recién elegido) seguiría filtrando de más
+  // durante ese mismo cálculo, dejando Agencia/Jefatura vacíos por error.
+  function computeEntityFilterOptions(hierarchy, filters) {
+    const out = { territorio: [], subgerencia: [], agencia: [], jefatura: [] };
+
+    walkTree(hierarchy, (node) => {
+      if (node.level === "territorio") out.territorio.push(node);
+    });
+
+    walkTree(hierarchy, (node, depth, path) => {
+      if (node.level === "subgerencia" && matchesSelection(path.territorio, filters.territorio)) {
+        out.subgerencia.push(node);
+      }
+    });
+
+    walkTree(hierarchy, (node, depth, path) => {
+      if (
+        node.level === "agencia" &&
+        matchesSelection(path.territorio, filters.territorio) &&
+        matchesSelection(path.subgerencia, filters.subgerencia)
+      ) {
+        out.agencia.push(node);
+      }
+    });
+
+    walkTree(hierarchy, (node, depth, path) => {
+      if (
+        node.level === "jefatura" &&
+        matchesSelection(path.territorio, filters.territorio) &&
+        matchesSelection(path.subgerencia, filters.subgerencia) &&
+        matchesSelection(path.agencia, filters.agencia)
+      ) {
+        out.jefatura.push(node);
+      }
+    });
+
+    return out;
+  }
+
+  // `path` es el path de ancestros (ver walkTree); `level`/`code` son los del
+  // nodo/entrada evaluado. Jefatura es un caso especial (a diferencia de
+  // Territorio/Subgerencia/Agencia, que acotan por ascendencia): al ser el
+  // nivel más específico, seleccionar una Jefatura debe mostrar solo esa
+  // persona puntual, no "todo lo que cuelgue de ella" (no tiene hijos).
+  function entityMatchesFilters(path, level, code, filters) {
+    if (!matchesSelection(path.territorio, filters.territorio)) return false;
+    if (!matchesSelection(path.subgerencia, filters.subgerencia)) return false;
+    if (!matchesSelection(path.agencia, filters.agencia)) return false;
+    if (filters.jefatura.length) {
+      if (level !== "jefatura" || !filters.jefatura.includes(code)) return false;
+    }
+    return true;
+  }
+
   function levelLabel(node) {
     return (
       {
@@ -111,7 +176,7 @@ window.GDD = (function () {
   }
 
   function formatPercent(value) {
-    return `${(value * 100).toFixed(1)}%`;
+    return `${Math.round(value * 100)}%`;
   }
 
   // Semáforo de cumplimiento: mismo criterio en la tabla completa y en "Mi
@@ -417,6 +482,9 @@ window.GDD = (function () {
     buildCombinedData,
     mergeHierarchyNode,
     walkTree,
+    matchesSelection,
+    computeEntityFilterOptions,
+    entityMatchesFilters,
     levelLabel,
     formatUpdatedAt,
     formatPercent,

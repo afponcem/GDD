@@ -4,6 +4,8 @@
   const {
     loadCombinedData,
     walkTree,
+    computeEntityFilterOptions,
+    entityMatchesFilters,
     levelLabel,
     formatUpdatedAt,
     formatPercent,
@@ -114,59 +116,13 @@
     });
   }
 
-  function matchesSelection(value, selected) {
-    return selected.length === 0 || (value !== undefined && selected.includes(value));
-  }
-
   function populateFilterOptions() {
     if (!state.combined) return;
 
-    const f = state.filters;
-
-    // Filtros concatenados en cascada, en 4 pasadas secuenciales: cada
-    // dimensión se calcula (y su selección se poda) usando ya el estado
-    // PODADO de la dimensión anterior — si se calcularan las 4 en una sola
-    // pasada, un filtro hijo que quedó obsoleto (ej. una Subgerencia que ya
-    // no pertenece al Territorio recién elegido) seguiría filtrando de más
-    // durante ese mismo render, dejando Agencia/Jefatura vacíos por error.
-    const territorios = [];
-    walkTree(state.combined.hierarchy, (node) => {
-      if (node.level === "territorio") territorios.push(node);
-    });
-    refreshFilterDropdown("territorio", territorios);
-
-    const subgerencias = [];
-    walkTree(state.combined.hierarchy, (node, depth, path) => {
-      if (node.level === "subgerencia" && matchesSelection(path.territorio, f.territorio)) {
-        subgerencias.push(node);
-      }
-    });
-    refreshFilterDropdown("subgerencia", subgerencias);
-
-    const agencias = [];
-    walkTree(state.combined.hierarchy, (node, depth, path) => {
-      if (
-        node.level === "agencia" &&
-        matchesSelection(path.territorio, f.territorio) &&
-        matchesSelection(path.subgerencia, f.subgerencia)
-      ) {
-        agencias.push(node);
-      }
-    });
-    refreshFilterDropdown("agencia", agencias);
-
-    const jefaturas = [];
-    walkTree(state.combined.hierarchy, (node, depth, path) => {
-      if (
-        node.level === "jefatura" &&
-        matchesSelection(path.territorio, f.territorio) &&
-        matchesSelection(path.subgerencia, f.subgerencia) &&
-        matchesSelection(path.agencia, f.agencia)
-      ) {
-        jefaturas.push(node);
-      }
-    });
-    refreshFilterDropdown("jefatura", jefaturas);
+    // Territorio/Subgerencia/Agencia/Jefatura: cascada compartida con Mi
+    // vista (ver computeEntityFilterOptions en shared.js).
+    const options = computeEntityFilterOptions(state.combined.hierarchy, state.filters);
+    ENTITY_FILTER_DIMS.forEach((dim) => refreshFilterDropdown(dim, options[dim]));
 
     // "Foco" no cuelga del árbol de entidades ni tiene cascada: es la lista
     // fija de focos distintos entre los indicadores cargados.
@@ -218,14 +174,7 @@
   }
 
   function nodeMatchesFilters(node, path) {
-    const f = state.filters;
-    if (!matchesSelection(path.territorio, f.territorio)) return false;
-    if (!matchesSelection(path.subgerencia, f.subgerencia)) return false;
-    if (!matchesSelection(path.agencia, f.agencia)) return false;
-    if (f.jefatura.length) {
-      if (node.level !== "jefatura" || !f.jefatura.includes(node.code)) return false;
-    }
-    return true;
+    return entityMatchesFilters(path, node.level, node.code, state.filters);
   }
 
   function renderActiveFilterChips() {
