@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches-ignore: []
+  pull_request: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r scripts/requirements-dev.txt
+
+      - name: Validar sintaxis de los workflows
+        run: python3 -c "
+          import yaml, pathlib;
+          [yaml.safe_load(p.read_text()) for p in pathlib.Path('.github/workflows').glob('*.yml')];
+          print('workflows OK')"
+
+      - name: Correr tests
+        run: python3 -m pytest tests/ -v

@@ -58,6 +58,11 @@ leer este sitio de SharePoint, no todo el tenant.
    ```http
    GET https://graph.microsoft.com/v1.0/sites/achs.sharepoint.com:/sites/PlanificacinyDesarrolloComercial
    ```
+   (`PlanificacinyDesarrolloComercial`, sin tildes ni espacios, es el slug
+   real que usa SharePoint en la URL del sitio — no es un error de tipeo,
+   viene tal cual del link compartido. Si el sitio se renombra, el slug
+   puede cambiar y hay que confirmarlo de nuevo).
+
    Copia el `id` de la respuesta (es `SHAREPOINT_SITE_ID`), luego:
    ```http
    POST https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_ID}/permissions
