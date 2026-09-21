@@ -20,12 +20,24 @@
     filters: { territorio: [], subgerencia: [], agencia: [], jefatura: [] },
   };
 
+  // Estado de los dropdowns de filtro (independiente de qué esté seleccionado):
+  // qué panel está abierto y el texto de búsqueda escrito en cada uno.
+  const dropdownState = {
+    open: null,
+    search: { territorio: "", subgerencia: "", agencia: "", jefatura: "" },
+  };
+  // Última lista de nodos disponibles (ya podada por la cascada) por dimensión,
+  // para que los botones "Todos"/"Ninguno" y el buscador del panel no tengan
+  // que recalcular el árbol.
+  const dropdownNodesCache = { territorio: [], subgerencia: [], agencia: [], jefatura: [] };
+
   const tableWrap = document.getElementById("table-wrap");
   const updatedAtEl = document.getElementById("updated-at");
 
   init();
 
   async function init() {
+    buildFilterDropdowns();
     bindControls();
     try {
       const res = await fetch("data/indicadores.json", { cache: "no-store" });
@@ -73,17 +85,6 @@
       applyIndicatorFilter();
     });
 
-    FILTER_DIMS.forEach((dim) => {
-      document.getElementById(`filter-${dim}`).addEventListener("change", (e) => {
-        state.filters[dim] = [...e.target.selectedOptions].map((o) => o.value);
-        // Cambiar un filtro más "arriba" en la jerarquía recalcula las
-        // opciones de los de abajo (cascada) y descarta selecciones que ya
-        // no pertenezcan a lo elegido, para que nunca queden dos filtros
-        // que no puedan calzar a la vez.
-        populateFilterOptions();
-        render();
-      });
-    });
     document.getElementById("clear-filters").addEventListener("click", () => {
       FILTER_DIMS.forEach((dim) => {
         state.filters[dim] = [];
@@ -158,7 +159,7 @@
     walkTree(viewData.hierarchy, (node) => {
       if (node.level === "territorio") territorios.push(node);
     });
-    fillMultiSelect("filter-territorio", territorios, f.territorio);
+    refreshFilterDropdown("territorio", territorios);
 
     const subgerencias = [];
     walkTree(viewData.hierarchy, (node, depth, path) => {
@@ -166,7 +167,7 @@
         subgerencias.push(node);
       }
     });
-    fillMultiSelect("filter-subgerencia", subgerencias, f.subgerencia);
+    refreshFilterDropdown("subgerencia", subgerencias);
 
     const agencias = [];
     walkTree(viewData.hierarchy, (node, depth, path) => {
@@ -178,7 +179,7 @@
         agencias.push(node);
       }
     });
-    fillMultiSelect("filter-agencia", agencias, f.agencia);
+    refreshFilterDropdown("agencia", agencias);
 
     const jefaturas = [];
     walkTree(viewData.hierarchy, (node, depth, path) => {
@@ -191,29 +192,172 @@
         jefaturas.push(node);
       }
     });
-    fillMultiSelect("filter-jefatura", jefaturas, f.jefatura);
+    refreshFilterDropdown("jefatura", jefaturas);
   }
 
-  function fillMultiSelect(id, nodes, selectedValues) {
-    const select = document.getElementById(id);
-    const validCodes = new Set(nodes.map((n) => n.code));
+  // --- Dropdown de filtro (checklist con buscador, "Todos"/"Ninguno") -----
+
+  function buildFilterDropdowns() {
+    const container = document.getElementById("filters-container");
+    const clearBtn = document.getElementById("clear-filters");
+
+    FILTER_DIMS.forEach((dim) => {
+      const wrap = document.createElement("div");
+      wrap.className = "filter-dropdown";
+      wrap.dataset.dim = dim;
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "filter-dropdown-toggle";
+      toggle.setAttribute("aria-haspopup", "true");
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.innerHTML = `<span class="label">${FILTER_LABELS[dim]}</span><span class="caret">▾</span>`;
+      toggle.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleDropdown(dim);
+      });
+
+      const panel = document.createElement("div");
+      panel.className = "filter-dropdown-panel";
+      panel.setAttribute("role", "group");
+      panel.setAttribute("aria-label", `Opciones de ${FILTER_LABELS[dim]}`);
+      panel.hidden = true;
+      panel.addEventListener("click", (e) => e.stopPropagation());
+
+      const search = document.createElement("input");
+      search.type = "search";
+      search.className = "filter-dropdown-search";
+      search.placeholder = `Buscar ${FILTER_LABELS[dim].toLowerCase()}…`;
+      search.addEventListener("input", (e) => {
+        dropdownState.search[dim] = e.target.value.trim().toLowerCase();
+        renderDropdownOptions(dim);
+      });
+
+      const actions = document.createElement("div");
+      actions.className = "filter-dropdown-actions";
+      const allBtn = document.createElement("button");
+      allBtn.type = "button";
+      allBtn.textContent = "Seleccionar todos";
+      allBtn.addEventListener("click", () => {
+        // Solo selecciona lo que el buscador del panel está mostrando en
+        // ese momento, no todo el universo de la dimensión — si el usuario
+        // filtró por texto antes de apretar "Seleccionar todos", esperaría
+        // que solo se marque lo que ve.
+        state.filters[dim] = visibleDropdownNodes(dim).map((n) => n.code);
+        populateFilterOptions();
+        render();
+      });
+      const noneBtn = document.createElement("button");
+      noneBtn.type = "button";
+      noneBtn.textContent = "Deseleccionar";
+      noneBtn.addEventListener("click", () => {
+        state.filters[dim] = [];
+        populateFilterOptions();
+        render();
+      });
+      actions.appendChild(allBtn);
+      actions.appendChild(noneBtn);
+
+      const options = document.createElement("div");
+      options.className = "filter-dropdown-options";
+
+      panel.appendChild(search);
+      panel.appendChild(actions);
+      panel.appendChild(options);
+      wrap.appendChild(toggle);
+      wrap.appendChild(panel);
+      container.insertBefore(wrap, clearBtn);
+    });
+
+    document.addEventListener("click", () => closeAllDropdowns());
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAllDropdowns();
+    });
+  }
+
+  function toggleDropdown(dim) {
+    const isOpen = dropdownState.open === dim;
+    closeAllDropdowns();
+    if (!isOpen) {
+      dropdownState.open = dim;
+      const wrap = document.querySelector(`.filter-dropdown[data-dim="${dim}"]`);
+      wrap.classList.add("open");
+      wrap.querySelector(".filter-dropdown-panel").hidden = false;
+      wrap.querySelector(".filter-dropdown-toggle").setAttribute("aria-expanded", "true");
+    }
+  }
+
+  function closeAllDropdowns() {
+    dropdownState.open = null;
+    document.querySelectorAll(".filter-dropdown").forEach((wrap) => {
+      wrap.classList.remove("open");
+      wrap.querySelector(".filter-dropdown-panel").hidden = true;
+      wrap.querySelector(".filter-dropdown-toggle").setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function visibleDropdownNodes(dim) {
+    const search = dropdownState.search[dim];
+    return (dropdownNodesCache[dim] || [])
+      .filter((n) => !search || n.name.toLowerCase().includes(search))
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  function refreshFilterDropdown(dim, nodes) {
+    dropdownNodesCache[dim] = nodes;
+
     // Poda del propio state: una selección que la cascada dejó fuera (ej. se
     // cambió Territorio y esa Subgerencia ya no pertenece) se descarta.
-    const kept = selectedValues.filter((v) => validCodes.has(v));
-    selectedValues.length = 0;
-    selectedValues.push(...kept);
+    const validCodes = new Set(nodes.map((n) => n.code));
+    const kept = state.filters[dim].filter((v) => validCodes.has(v));
+    state.filters[dim].length = 0;
+    state.filters[dim].push(...kept);
 
-    select.innerHTML = "";
-    nodes
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name, "es"))
-      .forEach((n) => {
-        const opt = document.createElement("option");
-        opt.value = n.code;
-        opt.textContent = n.name;
-        opt.selected = selectedValues.includes(n.code);
-        select.appendChild(opt);
+    const wrap = document.querySelector(`.filter-dropdown[data-dim="${dim}"]`);
+    const toggle = wrap.querySelector(".filter-dropdown-toggle");
+    const count = state.filters[dim].length;
+    const badge = count > 0 ? `<span class="count-badge">${count}</span>` : "";
+    toggle.querySelector(".label").outerHTML = `<span class="label">${FILTER_LABELS[dim]}</span>${badge}`;
+
+    renderDropdownOptions(dim);
+  }
+
+  function renderDropdownOptions(dim) {
+    const wrap = document.querySelector(`.filter-dropdown[data-dim="${dim}"]`);
+    const optionsEl = wrap.querySelector(".filter-dropdown-options");
+    const nodes = visibleDropdownNodes(dim);
+
+    optionsEl.innerHTML = "";
+    if (!nodes.length) {
+      const empty = document.createElement("div");
+      empty.className = "filter-dropdown-empty";
+      empty.textContent = "Sin opciones disponibles.";
+      optionsEl.appendChild(empty);
+      return;
+    }
+
+    nodes.forEach((n) => {
+      const optionLabel = document.createElement("label");
+      optionLabel.className = "filter-dropdown-option";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.filters[dim].includes(n.code);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          if (!state.filters[dim].includes(n.code)) state.filters[dim].push(n.code);
+        } else {
+          state.filters[dim] = state.filters[dim].filter((c) => c !== n.code);
+        }
+        populateFilterOptions();
+        render();
       });
+      const text = document.createElement("span");
+      text.textContent = n.name;
+      optionLabel.appendChild(checkbox);
+      optionLabel.appendChild(text);
+      optionsEl.appendChild(optionLabel);
+    });
   }
 
   function hasActiveFilter() {
@@ -235,10 +379,9 @@
     const container = document.getElementById("active-filters");
     container.innerHTML = "";
     FILTER_DIMS.forEach((dim) => {
-      const select = document.getElementById(`filter-${dim}`);
       state.filters[dim].forEach((code) => {
-        const option = [...select.options].find((o) => o.value === code);
-        const label = option ? option.textContent : code;
+        const node = (dropdownNodesCache[dim] || []).find((n) => n.code === code);
+        const label = node ? node.name : code;
         const chip = document.createElement("span");
         chip.className = "filter-chip";
         const text = document.createElement("span");

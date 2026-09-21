@@ -23,24 +23,9 @@
   </header>
 
   <div class="toolbar">
-    <div class="filters">
-      <label class="filter-field">
-        <span>Territorio <small class="muted">(shift/ctrl+clic = varios)</small></span>
-        <select id="filter-territorio" multiple size="4"></select>
-      </label>
-      <label class="filter-field">
-        <span>Subgerencia</span>
-        <select id="filter-subgerencia" multiple size="4"></select>
-      </label>
-      <label class="filter-field">
-        <span>Agencia</span>
-        <select id="filter-agencia" multiple size="4"></select>
-      </label>
-      <label class="filter-field">
-        <span>Jefatura</span>
-        <select id="filter-jefatura" multiple size="4"></select>
-      </label>
-      <button id="clear-filters" class="icon-btn text-btn" title="Limpiar filtros">Limpiar</button>
+    <div class="filters" id="filters-container">
+      <!-- Los 4 dropdowns (Territorio/Subgerencia/Agencia/Jefatura) se arman en JS: buildFilterDropdown() -->
+      <button id="clear-filters" class="icon-btn text-btn" title="Limpiar todos los filtros">Limpiar todo</button>
     </div>
     <input id="indicator-search" type="search" placeholder="Buscar indicador…" aria-label="Buscar indicador">
   </div>
