@@ -35,9 +35,17 @@
   async function init() {
     bindControls();
     try {
-      const res = await fetch("data/indicadores.json", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      state.data = await res.json();
+      // window.__EMBEDDED_DATA__ permite generar un .html standalone (datos
+      // incrustados) que abre directo por doble clic, sin servidor — usado
+      // para compartir una copia puntual fuera de GitHub Pages. En el sitio
+      // normal esta variable no existe y se hace fetch como siempre.
+      if (window.__EMBEDDED_DATA__) {
+        state.data = window.__EMBEDDED_DATA__;
+      } else {
+        const res = await fetch("data/indicadores.json", { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        state.data = await res.json();
+      }
       state.combined = buildCombinedData(state.data.weekly, state.data.ytd);
       state.entityIndex = flattenEntities(state.combined.hierarchy);
       updatedAtEl.textContent = formatUpdatedAt(state.data.generated_at);
