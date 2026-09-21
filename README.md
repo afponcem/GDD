@@ -25,14 +25,70 @@ está estructurado el Excel fuente y cómo mantener el parser si cambia.
 
 ### 1. Registrar la app en Azure AD / Entra ID de ACHS
 
-Se necesita una app registration con permisos de **aplicación** de Microsoft
-Graph (con consentimiento de administrador):
-- `Sites.Selected` (recomendado, acota el acceso solo al sitio
-  "Planificación y Desarrollo Comercial") — requiere además darle acceso al
-  sitio específico vía la API de Graph (`POST /sites/{site-id}/permissions`).
-- o `Sites.Read.All` si se prefiere no acotar por sitio.
+Requiere un rol de administrador en Entra ID de ACHS (Application
+Administrator o Global Administrator). Si no lo tienes, esta sección es lo
+que le pasas a TI tal cual.
 
-Con eso se obtienen: `tenant id`, `client id` y un `client secret`.
+**a) Crear la app registration**
+1. [entra.microsoft.com](https://entra.microsoft.com) → **Identity → Applications →
+   App registrations → New registration**.
+2. Nombre: `gdd-indicadores-sharepoint-reader` (o el que prefieran). Tipo de
+   cuenta: *Accounts in this organizational directory only*. Sin Redirect URI
+   (es una app de servidor, sin login interactivo).
+3. Anota el **Application (client) ID** y el **Directory (tenant) ID** que
+   quedan en la página de overview — son `SHAREPOINT_CLIENT_ID` y
+   `SHAREPOINT_TENANT_ID`.
+
+**b) Crear el client secret**
+1. En la misma app → **Certificates & secrets → New client secret**.
+2. Copia el **Value** apenas se genera (no se puede volver a ver después) —
+   es `SHAREPOINT_CLIENT_SECRET`.
+
+**c) Dar permiso de aplicación acotado al sitio (`Sites.Selected`)**
+Se usa `Sites.Selected` en vez de `Sites.Read.All` para que la app solo pueda
+leer este sitio de SharePoint, no todo el tenant.
+1. En la app → **API permissions → Add a permission → Microsoft Graph →
+   Application permissions** → buscar `Sites.Selected` → agregar.
+2. **Grant admin consent for ACHS** (botón en la misma pantalla) — sin esto
+   el permiso queda "not granted" y las llamadas fallan con 403.
+3. Dar acceso específico al sitio (esto no se hace desde el portal, es una
+   llamada Graph que debe ejecutar alguien con permiso sobre el sitio —
+   puede hacerse desde [Graph Explorer](https://developer.microsoft.com/en-us/graph/graph-explorer)
+   logueado como admin, o con `Invoke-RestMethod`/`curl`):
+   ```http
+   GET https://graph.microsoft.com/v1.0/sites/achs.sharepoint.com:/sites/PlanificacinyDesarrolloComercial
+   ```
+   Copia el `id` de la respuesta (es `SHAREPOINT_SITE_ID`), luego:
+   ```http
+   POST https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_ID}/permissions
+   Content-Type: application/json
+
+   {
+     "roles": ["read"],
+     "grantedToIdentities": [{
+       "application": {
+         "id": "{SHAREPOINT_CLIENT_ID}",
+         "displayName": "gdd-indicadores-sharepoint-reader"
+       }
+     }]
+   }
+   ```
+   Sin este paso, `Sites.Selected` no le da acceso a ningún sitio concreto.
+
+**d) Confirmar la ruta del archivo**
+`SHAREPOINT_FILE_PATH` es la ruta relativa a la raíz del drive del sitio —
+normalmente empieza con `Documentos compartidos/` (o `Shared Documents/`).
+Se puede confirmar listando la carpeta vía Graph Explorer:
+```http
+GET https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_ID}/drive/root:/Documentos compartidos:/children
+```
+
+**Alternativa más simple, menos acotada:** si registrar `Sites.Selected` +
+el paso (c) es mucho ida y vuelta con TI, se puede usar el permiso de
+aplicación `Sites.Read.All` en su lugar (paso a/b iguales, en el paso c solo
+se agrega y se otorga consentimiento de admin, sin la llamada POST) — la app
+podría leer cualquier sitio de SharePoint del tenant, así que es un permiso
+más amplio del que en principio se necesita.
 
 ### 2. Cargar los secrets del repositorio
 
