@@ -6,6 +6,7 @@
     walkTree,
     computeEntityFilterOptions,
     entityMatchesFilters,
+    focoColorVar,
     levelLabel,
     formatUpdatedAt,
     formatPercent,
@@ -88,11 +89,21 @@
   }
 
   function resetCollapsedDefault() {
-    // Vista inicial limpia: solo TOTAL + Territorios visibles.
+    // Vista inicial limpia: solo TOTAL + Territorios visibles. Cada nodo con
+    // hijos arranca colapsado (no solo los Territorios) para que expandir
+    // sea un drill-down de un nivel a la vez —Territorio revela Subgerencia/
+    // Agencia, Agencia revela Jefatura (el detalle con jefes)— en vez de
+    // destapar de golpe toda la rama hasta el último jefe apenas se abre el
+    // primer territorio. Así el recorrido queda pensado como el "doble clic"
+    // de un gerente territorial: cada clic baja exactamente un escalón.
     state.collapsed = new Set();
     if (!state.combined) return;
-    state.combined.hierarchy.children.forEach((territorio) => {
-      state.collapsed.add(territorio.code);
+    walkTree(state.combined.hierarchy, (node) => {
+      // El nodo TOTAL se deja expandido siempre (así se ven los Territorios
+      // de entrada); todo lo demás con hijos arranca colapsado.
+      if (node.level !== "total" && node.children && node.children.length) {
+        state.collapsed.add(node.code);
+      }
     });
   }
 
@@ -306,7 +317,27 @@
       groupTh.className = "indicator-group-th";
       groupTh.colSpan = 2;
       groupTh.dataset.indicatorKey = ind.key;
-      groupTh.textContent = ind.label;
+
+      // Foco arriba del nombre del indicador: para saber de un vistazo a
+      // qué categoría de negocio pertenece cada columna sin tener que abrir
+      // el filtro de Foco. El punto de color es un refuerzo visual — nunca
+      // reemplaza el texto (nunca color solo), así que el nombre del foco
+      // siempre se imprime igual, aunque no calce con ninguno de los 6
+      // conocidos (ind.foco null/"otro" cae al gris neutro de focoColorVar).
+      if (ind.foco) {
+        const focoTag = document.createElement("div");
+        focoTag.className = "indicator-foco-tag";
+        focoTag.title = `Foco: ${ind.foco}`;
+        focoTag.innerHTML = `<span class="foco-dot" style="background: var(${focoColorVar(
+          ind.foco
+        )})"></span><span>${escapeHtml(ind.foco)}</span>`;
+        groupTh.appendChild(focoTag);
+      }
+
+      const nameLine = document.createElement("div");
+      nameLine.className = "indicator-name";
+      nameLine.textContent = ind.label;
+      groupTh.appendChild(nameLine);
       row1.appendChild(groupTh);
 
       const ytdTh = document.createElement("th");
@@ -411,7 +442,12 @@
     const groupHeaders = table.querySelectorAll("thead th.indicator-group-th");
     groupHeaders.forEach((th) => {
       const key = th.dataset.indicatorKey;
-      const label = th.textContent.toLowerCase();
+      // Solo el nombre del indicador, no el th completo — desde que agrega
+      // el tag de Foco arriba, th.textContent también trae el nombre del
+      // foco, y el buscador de texto no debe matchear por ahí (para eso
+      // está el dropdown de Foco).
+      const nameEl = th.querySelector(".indicator-name");
+      const label = (nameEl ? nameEl.textContent : th.textContent).toLowerCase();
       const ind = state.indicatorsByKey.get(key);
       const matchesText = !state.indicatorFilter || label.includes(state.indicatorFilter);
       const matchesFoco = state.filters.foco.length === 0 || (ind && state.filters.foco.includes(ind.foco));

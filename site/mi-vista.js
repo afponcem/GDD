@@ -5,6 +5,8 @@
     loadCombinedData,
     computeEntityFilterOptions,
     entityMatchesFilters,
+    focoColorVar,
+    sortFocos,
     levelLabel,
     formatUpdatedAt,
     computeStatus,
@@ -15,6 +17,8 @@
     initThemeToggle,
     createChecklistDropdown,
   } = window.GDD;
+
+  const SIN_FOCO_LABEL = "Sin foco asignado";
 
   const STORAGE_KEY = "gdd-my-entity-code";
 
@@ -278,9 +282,6 @@
     myView.innerHTML = "";
     renderSummary(node, indicators);
 
-    const grid = document.createElement("div");
-    grid.className = "stat-grid";
-
     if (!indicators.length) {
       const empty = document.createElement("p");
       empty.className = "muted";
@@ -289,11 +290,48 @@
       return;
     }
 
+    // Agrupadas por Foco (orden fijo, ver sortFocos en shared.js) en vez de
+    // una sola grilla plana: así se lee cada panel de negocio por separado
+    // y el color+borde de severidad de cada tarjeta salta a la vista dentro
+    // de su propio grupo, en lugar de perderse entre indicadores de temas
+    // distintos.
+    const byFoco = new Map();
     indicators.forEach((ind) => {
-      grid.appendChild(buildStatTile(ind, node));
+      const foco = ind.foco || SIN_FOCO_LABEL;
+      if (!byFoco.has(foco)) byFoco.set(foco, []);
+      byFoco.get(foco).push(ind);
     });
 
-    myView.appendChild(grid);
+    sortFocos([...byFoco.keys()]).forEach((foco) => {
+      const group = document.createElement("section");
+      group.className = "foco-group";
+
+      const header = document.createElement("div");
+      header.className = "foco-group-header";
+      const dot = document.createElement("span");
+      dot.className = "foco-group-dot";
+      dot.style.background = `var(${focoColorVar(foco === SIN_FOCO_LABEL ? null : foco)})`;
+      const title = document.createElement("h3");
+      title.className = "foco-group-title";
+      title.textContent = foco;
+      const focoIndicators = byFoco.get(foco);
+      const count = document.createElement("span");
+      count.className = "foco-group-count";
+      count.textContent = `${focoIndicators.length} indicador${focoIndicators.length === 1 ? "" : "es"}`;
+      header.appendChild(dot);
+      header.appendChild(title);
+      header.appendChild(count);
+      group.appendChild(header);
+
+      const grid = document.createElement("div");
+      grid.className = "stat-grid";
+      focoIndicators.forEach((ind) => {
+        grid.appendChild(buildStatTile(ind, node));
+      });
+      group.appendChild(grid);
+
+      myView.appendChild(group);
+    });
   }
 
   function renderSummary(node, indicators) {
@@ -313,9 +351,21 @@
     summaryEl.hidden = false;
   }
 
+  // Prioridad para quedarse con el peor de los dos estados (YTD/MTD) como
+  // "severidad" de la tarjeta completa — así una tarjeta con un solo valor
+  // en rojo salta a la vista aunque el otro esté en verde.
+  const SEVERITY_RANK = { critical: 0, warning: 1, good: 2, neutral: 3 };
+
   function buildStatTile(ind, node) {
     const tile = document.createElement("div");
     tile.className = "stat-tile";
+
+    const ytdValue = node.valuesYtd ? node.valuesYtd[ind.key] : undefined;
+    const mtdValue = node.valuesMtd ? node.valuesMtd[ind.key] : undefined;
+    const ytdStatus = computeStatus(ytdValue, ind.metaYtd).status;
+    const mtdStatus = computeStatus(mtdValue, ind.metaMtd).status;
+    const severity = SEVERITY_RANK[ytdStatus] <= SEVERITY_RANK[mtdStatus] ? ytdStatus : mtdStatus;
+    tile.dataset.severity = severity;
 
     const label = document.createElement("div");
     label.className = "stat-label";
@@ -323,8 +373,8 @@
     label.title = ind.label;
     tile.appendChild(label);
 
-    tile.appendChild(buildStatRow("YTD", node.valuesYtd ? node.valuesYtd[ind.key] : undefined, ind.metaYtd));
-    tile.appendChild(buildStatRow("MTD", node.valuesMtd ? node.valuesMtd[ind.key] : undefined, ind.metaMtd));
+    tile.appendChild(buildStatRow("YTD", ytdValue, ind.metaYtd));
+    tile.appendChild(buildStatRow("MTD", mtdValue, ind.metaMtd));
 
     return tile;
   }

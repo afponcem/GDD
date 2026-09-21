@@ -19,6 +19,14 @@
   --status-neutral: #898781;
   --row-zebra: rgba(11, 11, 11, 0.025);
   --row-hover: rgba(42, 120, 214, 0.10);
+  /* Paleta categórica (6 focos de negocio) — orden fijo, nunca ciclada; ver
+     .claude/skills.../dataviz y el mapeo FOCO_COLOR_VARS en shared.js. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -39,6 +47,12 @@
     --status-neutral: #898781;
     --row-zebra: rgba(255, 255, 255, 0.025);
     --row-hover: rgba(57, 135, 229, 0.16);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
   }
 }
 :root[data-theme="dark"] .viz-root {
@@ -58,6 +72,12 @@
   --status-neutral: #898781;
   --row-zebra: rgba(255, 255, 255, 0.025);
   --row-hover: rgba(57, 135, 229, 0.16);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
 }
 
 * { box-sizing: border-box; }
@@ -429,6 +449,33 @@ th.indicator-group-th {
   border-left: 1px solid var(--gridline);
 }
 
+.indicator-foco-tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.foco-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.indicator-name {
+  font-weight: 600;
+}
+
 th.sub-col.ytd,
 td.sub-col.ytd {
   border-left: 1px solid var(--gridline);
@@ -666,12 +713,53 @@ col.hidden-col, th.hidden-col, td.hidden-col { display: none; }
 
 .stat-tile {
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
   background: var(--surface-1);
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Refuerzo visual por severidad (peor estado entre YTD/MTD) — para que un
+   vistazo rápido al grupo de un foco encuentre las tarjetas que necesitan
+   atención sin tener que leer cada número. */
+.stat-tile[data-severity="critical"] { border-left-color: var(--status-critical); }
+.stat-tile[data-severity="warning"] { border-left-color: var(--status-warning); }
+.stat-tile[data-severity="good"] { border-left-color: var(--status-good); }
+
+.foco-group + .foco-group {
+  margin-top: 22px;
+}
+
+.foco-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.foco-group-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+  transform: translateY(1px);
+}
+
+.foco-group-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.foco-group-count {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .stat-label {

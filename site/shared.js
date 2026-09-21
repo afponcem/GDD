@@ -148,6 +148,50 @@ window.GDD = (function () {
     return true;
   }
 
+  // --- Color por Foco (identidad categórica, orden fijo — ver skill dataviz:
+  // "Assign categorical hues in fixed order, never cycled"). Los 6 focos de
+  // negocio son una taxonomía conocida y estable (no una serie abierta que
+  // crece con cada filtro), así que el mapeo va harcodeado por nombre en vez
+  // de asignarse dinámicamente. Un foco fuera de esta lista (o sin foco)
+  // usa gris neutro — nunca un 7mo tono categórico sin validar. Se usa tanto
+  // en la Tabla completa (encabezado de columna) como en Mi vista (tarjetas
+  // agrupadas), para que el mismo Foco se vea siempre del mismo color en
+  // toda la app.
+  const FOCO_ORDER = [
+    "Captación",
+    "Fidelización",
+    "Gestión Preventiva",
+    "MCE (Modelo Cultura y Experiencia)",
+    "Procesos Regulatorios",
+    "Productos y Servicios",
+  ];
+  const FOCO_COLOR_VARS = {
+    "Captación": "--series-1",
+    "Fidelización": "--series-2",
+    "Gestión Preventiva": "--series-3",
+    "MCE (Modelo Cultura y Experiencia)": "--series-4",
+    "Procesos Regulatorios": "--series-5",
+    "Productos y Servicios": "--series-6",
+  };
+
+  function focoColorVar(foco) {
+    return FOCO_COLOR_VARS[foco] || "--text-muted";
+  }
+
+  // Ordena una lista de focos presentes en los datos según FOCO_ORDER (los
+  // focos conocidos primero, en su orden fijo; cualquier otro nombre —o
+  // "Sin foco"— al final, en orden alfabético).
+  function sortFocos(focos) {
+    return [...focos].sort((a, b) => {
+      const ia = FOCO_ORDER.indexOf(a);
+      const ib = FOCO_ORDER.indexOf(b);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return a.localeCompare(b, "es");
+    });
+  }
+
   function levelLabel(node) {
     return (
       {
@@ -485,6 +529,8 @@ window.GDD = (function () {
     matchesSelection,
     computeEntityFilterOptions,
     entityMatchesFilters,
+    focoColorVar,
+    sortFocos,
     levelLabel,
     formatUpdatedAt,
     formatPercent,
