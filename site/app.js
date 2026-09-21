@@ -11,7 +11,9 @@
 
   const state = {
     data: null,
-    view: "weekly",
+    // Árbol e indicadores fusionados (YTD + MTD en una sola estructura),
+    // armados una vez al cargar los datos por buildCombinedData().
+    combined: null,
     indicatorFilter: "",
     collapsed: null, // Set inicializado al cargar datos (colapsa territorios por defecto)
     // Cada dimensión es un array de códigos seleccionados (multi-select).
@@ -43,6 +45,7 @@
       const res = await fetch("data/indicadores.json", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       state.data = await res.json();
+      state.combined = buildCombinedData(state.data.weekly, state.data.ytd);
       updatedAtEl.textContent = formatUpdatedAt(state.data.generated_at);
       resetCollapsedDefault();
       populateFilterOptions();
@@ -57,29 +60,69 @@
   function resetCollapsedDefault() {
     // Vista inicial limpia: solo TOTAL + Territorios visibles.
     state.collapsed = new Set();
-    const viewData = state.data[state.view];
-    if (!viewData) return;
-    viewData.hierarchy.children.forEach((territorio) => {
+    if (!state.combined) return;
+    state.combined.hierarchy.children.forEach((territorio) => {
       state.collapsed.add(territorio.code);
     });
   }
 
-  function bindControls() {
-    document.querySelectorAll(".view-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".view-btn").forEach((b) => {
-          b.classList.remove("active");
-          b.setAttribute("aria-selected", "false");
-        });
-        btn.classList.add("active");
-        btn.setAttribute("aria-selected", "true");
-        state.view = btn.dataset.view;
-        resetCollapsedDefault();
-        populateFilterOptions();
-        render();
+  // --- Fusión de las vistas Semanal (MTD) y Acumulado (YTD) en un solo árbol ---
+  // Cada nodo fusionado guarda valuesYtd/valuesMtd por separado en vez de
+  // un único `values`, y los hijos se unen por código (unión, no intersección
+  // — si una entidad solo existe en una de las dos hojas, igual aparece,
+  // con la otra columna en blanco).
+  function buildCombinedData(weekly, ytd) {
+    const indicatorsMap = new Map();
+    [weekly.indicators, ytd.indicators].forEach((catalog) => {
+      Object.entries(catalog || {}).forEach(([key, meta]) => {
+        if (!indicatorsMap.has(key)) indicatorsMap.set(key, meta.label);
       });
     });
+    const indicators = [...indicatorsMap.keys()].map((key) => {
+      const w = weekly.indicators[key];
+      const y = ytd.indicators[key];
+      return {
+        key,
+        label: indicatorsMap.get(key),
+        metaYtd: y ? y.meta : undefined,
+        metaMtd: w ? w.meta : undefined,
+        fechaYtd: y ? y.fecha_corte : undefined,
+        fechaMtd: w ? w.fecha_corte : undefined,
+      };
+    });
 
+    return { hierarchy: mergeHierarchyNode(weekly.hierarchy, ytd.hierarchy), indicators };
+  }
+
+  function mergeHierarchyNode(weeklyNode, ytdNode) {
+    const base = weeklyNode || ytdNode;
+    const node = {
+      code: base.code,
+      name: base.name,
+      level: base.level,
+      valuesYtd: (ytdNode && ytdNode.values) || {},
+      valuesMtd: (weeklyNode && weeklyNode.values) || {},
+      children: [],
+    };
+
+    const wChildren = (weeklyNode && weeklyNode.children) || [];
+    const yChildren = (ytdNode && ytdNode.children) || [];
+    const yByCode = new Map(yChildren.map((c) => [c.code, c]));
+    const usedYtdCodes = new Set();
+    const pairs = wChildren.map((wc) => {
+      const yc = yByCode.get(wc.code) || null;
+      if (yc) usedYtdCodes.add(wc.code);
+      return [wc, yc];
+    });
+    yChildren.forEach((yc) => {
+      if (!usedYtdCodes.has(yc.code)) pairs.push([null, yc]);
+    });
+
+    node.children = pairs.map(([wc, yc]) => mergeHierarchyNode(wc, yc));
+    return node;
+  }
+
+  function bindControls() {
     document.getElementById("indicator-search").addEventListener("input", (e) => {
       state.indicatorFilter = e.target.value.trim().toLowerCase();
       applyIndicatorFilter();
@@ -144,8 +187,7 @@
   }
 
   function populateFilterOptions() {
-    const viewData = state.data[state.view];
-    if (!viewData) return;
+    if (!state.combined) return;
 
     const f = state.filters;
 
@@ -156,13 +198,13 @@
     // no pertenece al Territorio recién elegido) seguiría filtrando de más
     // durante ese mismo render, dejando Agencia/Jefatura vacíos por error.
     const territorios = [];
-    walkTree(viewData.hierarchy, (node) => {
+    walkTree(state.combined.hierarchy, (node) => {
       if (node.level === "territorio") territorios.push(node);
     });
     refreshFilterDropdown("territorio", territorios);
 
     const subgerencias = [];
-    walkTree(viewData.hierarchy, (node, depth, path) => {
+    walkTree(state.combined.hierarchy, (node, depth, path) => {
       if (node.level === "subgerencia" && matchesSelection(path.territorio, f.territorio)) {
         subgerencias.push(node);
       }
@@ -170,7 +212,7 @@
     refreshFilterDropdown("subgerencia", subgerencias);
 
     const agencias = [];
-    walkTree(viewData.hierarchy, (node, depth, path) => {
+    walkTree(state.combined.hierarchy, (node, depth, path) => {
       if (
         node.level === "agencia" &&
         matchesSelection(path.territorio, f.territorio) &&
@@ -182,7 +224,7 @@
     refreshFilterDropdown("agencia", agencias);
 
     const jefaturas = [];
-    walkTree(viewData.hierarchy, (node, depth, path) => {
+    walkTree(state.combined.hierarchy, (node, depth, path) => {
       if (
         node.level === "jefatura" &&
         matchesSelection(path.territorio, f.territorio) &&
@@ -402,17 +444,12 @@
   }
 
   function render() {
-    const viewData = state.data[state.view];
-    if (!viewData) {
-      tableWrap.innerHTML = `<p class="muted">No hay datos para esta vista.</p>`;
+    if (!state.combined) {
+      tableWrap.innerHTML = `<p class="muted">No hay datos.</p>`;
       return;
     }
-    const indicators = Object.entries(viewData.indicators).map(([key, meta]) => ({
-      key,
-      ...meta,
-    }));
-
-    const rows = buildVisibleRows(viewData.hierarchy);
+    const indicators = state.combined.indicators;
+    const rows = buildVisibleRows(state.combined.hierarchy);
 
     const table = document.createElement("table");
     table.className = "matrix";
@@ -429,6 +466,21 @@
     tableWrap.appendChild(table);
     applyIndicatorFilter();
     renderActiveFilterChips();
+    syncSubHeaderStickyOffset(table);
+  }
+
+  function syncSubHeaderStickyOffset(table) {
+    // La 2a fila del header (YTD/MTD) queda sticky justo debajo de la 1a
+    // (nombres de indicador) — el offset depende de la altura real
+    // renderizada de esa 1a fila (fuente, tema, zoom), así que se mide en
+    // vez de asumir un valor fijo (el CSS trae un valor de respaldo).
+    const row1 = table.querySelector("thead tr:first-child");
+    if (!row1) return;
+    const height = row1.getBoundingClientRect().height;
+    if (!height) return;
+    table.querySelectorAll("thead tr:last-child th:not(.entity-col)").forEach((th) => {
+      th.style.top = `${height}px`;
+    });
   }
 
   function buildVisibleRows(root) {
@@ -483,28 +535,47 @@
 
   function buildHead(indicators) {
     const thead = document.createElement("thead");
-    const tr = document.createElement("tr");
+    const row1 = document.createElement("tr");
+    const row2 = document.createElement("tr");
+
     const entityTh = document.createElement("th");
     entityTh.className = "entity-col";
+    entityTh.rowSpan = 2;
     entityTh.textContent = "Territorio / Subgerencia / Agencia / Jefatura";
-    tr.appendChild(entityTh);
+    row1.appendChild(entityTh);
 
     indicators.forEach((ind) => {
-      const th = document.createElement("th");
-      th.dataset.indicatorKey = ind.key;
-      th.title = buildIndicatorTitle(ind);
-      th.textContent = ind.label;
-      tr.appendChild(th);
+      const groupTh = document.createElement("th");
+      groupTh.className = "indicator-group-th";
+      groupTh.colSpan = 2;
+      groupTh.dataset.indicatorKey = ind.key;
+      groupTh.textContent = ind.label;
+      row1.appendChild(groupTh);
+
+      const ytdTh = document.createElement("th");
+      ytdTh.className = "sub-col ytd";
+      ytdTh.dataset.indicatorKey = ind.key;
+      ytdTh.title = buildIndicatorTitle(ind.metaYtd, ind.fechaYtd);
+      ytdTh.textContent = "YTD";
+      row2.appendChild(ytdTh);
+
+      const mtdTh = document.createElement("th");
+      mtdTh.className = "sub-col mtd";
+      mtdTh.dataset.indicatorKey = ind.key;
+      mtdTh.title = buildIndicatorTitle(ind.metaMtd, ind.fechaMtd);
+      mtdTh.textContent = "MTD";
+      row2.appendChild(mtdTh);
     });
 
-    thead.appendChild(tr);
+    thead.appendChild(row1);
+    thead.appendChild(row2);
     return thead;
   }
 
-  function buildIndicatorTitle(ind) {
+  function buildIndicatorTitle(meta, fechaCorte) {
     const parts = [];
-    if (ind.meta !== null && ind.meta !== undefined) parts.push(`Meta: ${formatMeta(ind.meta)}`);
-    if (ind.fecha_corte) parts.push(`Corte: ${ind.fecha_corte}`);
+    if (meta !== null && meta !== undefined) parts.push(`Meta: ${formatMeta(meta)}`);
+    if (fechaCorte) parts.push(`Corte: ${fechaCorte}`);
     return parts.join(" · ");
   }
 
@@ -548,12 +619,19 @@
       tr.appendChild(entityTd);
 
       indicators.forEach((ind) => {
-        const td = document.createElement("td");
-        td.className = "value-cell";
-        td.dataset.indicatorKey = ind.key;
-        const value = node.values ? node.values[ind.key] : undefined;
-        td.appendChild(buildCell(value, ind));
-        tr.appendChild(td);
+        const ytdTd = document.createElement("td");
+        ytdTd.className = "value-cell sub-col ytd";
+        ytdTd.dataset.indicatorKey = ind.key;
+        const ytdValue = node.valuesYtd ? node.valuesYtd[ind.key] : undefined;
+        ytdTd.appendChild(buildCell(ytdValue, ind.metaYtd));
+        tr.appendChild(ytdTd);
+
+        const mtdTd = document.createElement("td");
+        mtdTd.className = "value-cell sub-col mtd";
+        mtdTd.dataset.indicatorKey = ind.key;
+        const mtdValue = node.valuesMtd ? node.valuesMtd[ind.key] : undefined;
+        mtdTd.appendChild(buildCell(mtdValue, ind.metaMtd));
+        tr.appendChild(mtdTd);
       });
 
       tbody.appendChild(tr);
@@ -562,7 +640,7 @@
     return tbody;
   }
 
-  function buildCell(value, indicator) {
+  function buildCell(value, meta) {
     const wrap = document.createElement("span");
     wrap.className = "cell-inner";
 
@@ -571,7 +649,7 @@
       return wrap;
     }
 
-    const hasNumericMeta = typeof indicator.meta === "number" && indicator.meta > 0;
+    const hasNumericMeta = typeof meta === "number" && meta > 0;
     if (!hasNumericMeta || typeof value !== "number") {
       wrap.innerHTML = `<span class="status-icon neutral">·</span><span>${escapeHtml(
         formatRaw(value)
@@ -579,7 +657,7 @@
       return wrap;
     }
 
-    const ratio = value / indicator.meta;
+    const ratio = value / meta;
     const status = ratio >= 1 ? "good" : ratio >= 0.8 ? "warning" : "critical";
     const icon = status === "good" ? "✓" : status === "warning" ? "!" : "✕";
     wrap.innerHTML = `<span class="status-icon ${status}">${icon}</span><span>${formatPercent(
@@ -603,15 +681,17 @@
     const table = tableWrap.querySelector("table.matrix");
     if (!table) return;
 
-    const headerCells = table.querySelectorAll("thead th[data-indicator-key]");
-    headerCells.forEach((th) => {
+    const groupHeaders = table.querySelectorAll("thead th.indicator-group-th");
+    groupHeaders.forEach((th) => {
       const key = th.dataset.indicatorKey;
       const label = th.textContent.toLowerCase();
       const matches = !state.indicatorFilter || label.includes(state.indicatorFilter);
-      th.classList.toggle("hidden-col", !matches);
+      // Un mismo data-indicator-key marca el th de grupo (fila 1), los 2 th
+      // de subcolumna YTD/MTD (fila 2) y las 2 td por fila del cuerpo — se
+      // ocultan todos juntos.
       table
-        .querySelectorAll(`td[data-indicator-key="${cssEscape(key)}"]`)
-        .forEach((td) => td.classList.toggle("hidden-col", !matches));
+        .querySelectorAll(`[data-indicator-key="${cssEscape(key)}"]`)
+        .forEach((el) => el.classList.toggle("hidden-col", !matches));
     });
   }
 

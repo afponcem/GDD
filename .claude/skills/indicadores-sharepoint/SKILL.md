@@ -151,6 +151,26 @@ tenant id, vía variables de entorno `SHAREPOINT_TENANT_ID`,
 Si el `site-id` o el path cambian (ej. reorganización de SharePoint), hay que
 volver a resolverlos con Graph Explorer o `GET /sites/achs.sharepoint.com:/sites/PlanificacinyDesarrolloComercial`.
 
+## Vista combinada YTD/MTD en el sitio
+
+`site/app.js` (`buildCombinedData`/`mergeHierarchyNode`) fusiona los árboles
+`weekly` y `ytd` en uno solo (una columna YTD y otra MTD por indicador, en
+vez del toggle de vistas separadas que tenía la v1). La unión de hijos entre
+ambos árboles es **por código**, no por posición: si una jefatura/agencia
+existe en una hoja pero no en la otra (ej. alguien que dejó el cargo esta
+semana y aún aparece en el acumulado YTD, o un ingreso nuevo que todavía no
+tiene histórico YTD), el nodo igual aparece en la tabla combinada, pero
+puede quedar al final de la lista de hermanos en vez de en su posición
+habitual del organigrama — es un efecto cosmético (orden de filas), no
+pérdida de datos. Si el fallback de territorio de `parse_tablero.py` (cuando
+el nombre corto de territorio no resuelve, ver `resolve_territorio`) se
+disparara de forma distinta entre las dos hojas para el mismo código —no
+debería pasar en la práctica, ambas hojas comparten el mismo organigrama—
+esa entidad quedaría duplicada como dos filas (una con solo YTD, otra con
+solo MTD) en vez de fusionada en una. No se ha visto en los archivos reales
+probados hasta ahora, pero si aparece una fila "duplicada" con datos a
+medias, es la primera hipótesis a revisar.
+
 ## Automatización semanal
 
 El parser **no invoca un LLM** — es determinístico y corre solo en
