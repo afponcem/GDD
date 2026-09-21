@@ -132,7 +132,8 @@ body {
 
 .toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  justify-content: space-between;
   gap: 12px;
   padding: 12px 20px;
   flex-wrap: wrap;
@@ -148,6 +149,48 @@ body {
   font-family: inherit;
   font-size: 13px;
   min-width: 200px;
+}
+
+.filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.filter-field select,
+.filter-field input {
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  min-width: 150px;
+}
+
+.icon-btn.text-btn {
+  width: auto;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.legend-bar {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--gridline);
 }
 
 .legend {
@@ -224,6 +267,8 @@ td.entity-col, th.entity-col {
 tr.level-total td.entity-col { font-weight: 700; }
 tr.level-territorio td.entity-col { font-weight: 600; padding-left: 24px; }
 tr.level-subgerencia td.entity-col { padding-left: 44px; color: var(--text-secondary); }
+tr.level-agencia td.entity-col { padding-left: 44px; color: var(--text-secondary); font-style: italic; }
+tr.level-jefatura td.entity-col { padding-left: 64px; color: var(--text-muted); font-size: 12px; }
 
 .entity-toggle {
   background: none;
@@ -264,7 +309,6 @@ td.value-cell {
 .status-icon.critical { background: var(--status-critical); }
 .status-icon.neutral { background: var(--status-neutral); opacity: 0.5; }
 
-tr.hidden-row { display: none; }
 col.hidden-col, th.hidden-col, td.hidden-col { display: none; }
 
 #status-msg { padding: 20px 0; }

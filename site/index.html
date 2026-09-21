@@ -23,14 +23,33 @@
   </header>
 
   <div class="toolbar">
-    <input id="entity-search" type="search" placeholder="Buscar territorio o subgerencia…" aria-label="Buscar entidad">
-    <input id="indicator-search" type="search" placeholder="Buscar indicador…" aria-label="Buscar indicador">
-    <div class="legend" aria-hidden="false">
-      <span class="legend-item"><span class="status-dot good"></span> ✓ Cumple</span>
-      <span class="legend-item"><span class="status-dot warning"></span> ! Alerta</span>
-      <span class="legend-item"><span class="status-dot critical"></span> ✕ Bajo meta</span>
-      <span class="legend-item"><span class="status-dot neutral"></span> Sin meta / sin dato</span>
+    <div class="filters">
+      <label class="filter-field">
+        <span>Territorio</span>
+        <select id="filter-territorio"><option value="">Todos</option></select>
+      </label>
+      <label class="filter-field">
+        <span>Subgerencia</span>
+        <select id="filter-subgerencia"><option value="">Todas</option></select>
+      </label>
+      <label class="filter-field">
+        <span>Agencia</span>
+        <select id="filter-agencia"><option value="">Todas</option></select>
+      </label>
+      <label class="filter-field">
+        <span>Jefatura</span>
+        <input id="filter-jefatura" type="search" list="jefatura-options" placeholder="Todas" aria-label="Filtrar por jefatura">
+        <datalist id="jefatura-options"></datalist>
+      </label>
+      <button id="clear-filters" class="icon-btn text-btn" title="Limpiar filtros">Limpiar</button>
     </div>
+    <input id="indicator-search" type="search" placeholder="Buscar indicador…" aria-label="Buscar indicador">
+  </div>
+  <div class="legend-bar">
+    <span class="legend-item"><span class="status-dot good"></span> ✓ Cumple</span>
+    <span class="legend-item"><span class="status-dot warning"></span> ! Alerta</span>
+    <span class="legend-item"><span class="status-dot critical"></span> ✕ Bajo meta</span>
+    <span class="legend-item"><span class="status-dot neutral"></span> Sin meta / sin dato</span>
   </div>
 
   <main id="table-wrap" class="table-wrap">

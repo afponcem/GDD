@@ -60,14 +60,21 @@ Hojas ignoradas por completo: `Hoja1` (notas sueltas sin estructura).
   - Fila 8: fila `TOTAL RED ACHS` (col A = código, col B = nombre, resto = valores). Es la raíz del árbol.
   - Marcador `TERRITORIO` en columna B (col A vacía) → siguen filas de territorio: col A = código (`GRTR10xx`), col B = nombre.
   - Marcador `SUBGERENCIA` en columna B → siguen filas de subgerencia: col A = código (`SGRGxxxx`), col B = nombre corto del territorio padre (**solo en la primera fila de cada grupo** — hay que hacer forward-fill), col C = nombre de la subgerencia.
-  - Marcador `AGENCIAS` en columna B → nivel agencia, y más abajo `JEFATURA` → nivel persona. **El parser actual se detiene acá** (no baja de Subgerencia).
+  - Marcador `AGENCIAS` en columna B → siguen filas de agencia: col A = código/nombre, col B = nombre corto del territorio padre (forward-fill, igual que en `SUBGERENCIA`), col C = nombre de la agencia. **Ojo:** esta sección solo liga Agencia → Territorio. La planilla **no da el código de Subgerencia intermedio**, así que el parser cuelga la agencia directo del territorio (nivel `"agencia"`), no de la subgerencia — anidarla ahí sería inventar un vínculo que el archivo no tiene.
+  - Marcador `JEFATURA` en columna B → siguen filas de persona (nivel `"jefatura"`). A diferencia de Agencia, acá sí hay vínculo con Subgerencia: dentro de esta sección aparecen filas que **repiten el código y nombre exactos de una fila de `SUBGERENCIA`** (mismo `SGRGxxxx`, mismo nombre en col C, mismo valor agregado) — son encabezados de grupo, no personas. El parser las detecta comparando código+nombre contra las subgerencias ya vistas (`subgerencias_by_code`) y usa esa fila como "subgerencia actual" para las personas que siguen, hasta el próximo encabezado. Las primeras filas de la sección (antes de cualquier encabezado de subgerencia) son cargos a nivel territorial y cuelgan directo del territorio.
   - Valor `-` en una celda de indicador significa "sin dato" (se omite en el JSON, no se guarda como 0).
 
-El nombre corto de territorio en las filas de subgerencia (`NORTE`/`METRO`/`SUR`)
+El nombre corto de territorio en las filas de subgerencia/agencia (`NORTE`/`METRO`/`SUR`)
 no calza textualmente con el nombre completo del territorio (`TERRITORIO NORTE`,
 `TERRITORIO METROPOLITANO`, `TERRITORIO SUR`). El mapeo está hardcodeado en
 `TERRITORIO_SHORT_NAME_MAP` dentro de `scripts/parse_tablero.py` — **si ACHS
 renombra un territorio, hay que actualizar ese diccionario**.
+
+El árbol resultante queda asimétrico a propósito: `Territorio → Subgerencia →
+Jefatura` por un lado, y `Territorio → Agencia` por otro (Agencia y
+Subgerencia son ramas paralelas bajo el mismo Territorio, no una anidada en
+la otra). Si en algún momento ACHS agrega una columna o fila que sí ligue
+Agencia con Subgerencia, vale la pena revisar si conviene re-anidar.
 
 ## Cómo regenerar/extender el parser
 
