@@ -97,28 +97,41 @@ body {
   gap: 12px;
 }
 
-.page-nav {
+.tab-switch {
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
 }
 
-.page-nav-link {
+.tab-btn {
   padding: 8px 14px;
   font-size: 13px;
   color: var(--text-secondary);
-  text-decoration: none;
   background: var(--surface-1);
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
 }
 
-.page-nav-link:hover {
+.tab-btn:hover {
   color: var(--text-primary);
 }
 
-.page-nav-link.active {
+.tab-btn.active {
   background: var(--accent);
   color: #fff;
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.tab-panel[hidden] {
+  display: none;
 }
 
 .icon-btn {

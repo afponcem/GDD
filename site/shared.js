@@ -177,6 +177,67 @@ window.GDD = (function () {
     }
   }
 
+  // Datos del JSON, cacheados en una sola promesa: si la página tiene varias
+  // pestañas/módulos (tabla completa + Mi vista) que necesitan los mismos
+  // datos, solo se hace un fetch, no uno por módulo. window.__EMBEDDED_DATA__,
+  // cuando está presente, reemplaza el fetch — lo usa el .html standalone
+  // (datos incrustados, sin servidor).
+  let dataPromise = null;
+  function loadIndicadoresData() {
+    if (window.__EMBEDDED_DATA__) return Promise.resolve(window.__EMBEDDED_DATA__);
+    if (!dataPromise) {
+      dataPromise = fetch("data/indicadores.json", { cache: "no-store" })
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .catch((err) => {
+          // No dejar una promesa rechazada cacheada para siempre — un fallo
+          // transitorio (red, GitHub Pages) no debe bloquear reintentos del
+          // otro módulo de pestaña, o de una futura acción "reintentar".
+          dataPromise = null;
+          throw err;
+        });
+    }
+    return dataPromise;
+  }
+
+  // Árbol+indicadores fusionados (YTD/MTD), cacheados igual que los datos
+  // crudos: tabla completa y Mi vista corren a la vez en la misma página y
+  // piden lo mismo — sin este caché, buildCombinedData() (que recorre todo
+  // el árbol) se ejecutaría dos veces por carga en vez de una.
+  let combinedDataPromise = null;
+  function loadCombinedData() {
+    if (!combinedDataPromise) {
+      combinedDataPromise = loadIndicadoresData().then((data) => ({
+        data,
+        combined: buildCombinedData(data.weekly, data.ytd),
+      }));
+      combinedDataPromise.catch(() => {
+        combinedDataPromise = null;
+      });
+    }
+    return combinedDataPromise;
+  }
+
+  // Toggle de tema claro/oscuro — un solo botón #theme-toggle compartido por
+  // todas las pestañas/páginas de la app, así que se inicializa una sola vez
+  // (si cada módulo de pestaña le agregara su propio listener, un clic
+  // alternaría el tema dos veces y no se vería ningún cambio).
+  function initThemeToggle() {
+    const themeToggle = document.getElementById("theme-toggle");
+    if (!themeToggle || themeToggle.dataset.themeBound) return;
+    themeToggle.dataset.themeBound = "true";
+    const saved = safeGet("gdd-theme");
+    if (saved) document.documentElement.setAttribute("data-theme", saved);
+    themeToggle.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme");
+      const next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      safeSet("gdd-theme", next);
+    });
+  }
+
   return {
     buildCombinedData,
     mergeHierarchyNode,
@@ -190,5 +251,8 @@ window.GDD = (function () {
     escapeHtml,
     safeGet,
     safeSet,
+    loadIndicadoresData,
+    loadCombinedData,
+    initThemeToggle,
   };
 })();

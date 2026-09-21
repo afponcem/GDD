@@ -2,15 +2,14 @@
   "use strict";
 
   const {
-    buildCombinedData,
+    loadCombinedData,
     walkTree,
     levelLabel,
     formatUpdatedAt,
     formatPercent,
     valueCellMarkup,
     escapeHtml,
-    safeGet,
-    safeSet,
+    initThemeToggle,
   } = window.GDD;
 
   const FILTER_DIMS = ["territorio", "subgerencia", "agencia", "jefatura"];
@@ -53,19 +52,19 @@
   async function init() {
     buildFilterDropdowns();
     bindControls();
+    initThemeToggle();
+    document.addEventListener("gdd:tab-shown", (e) => {
+      // Si esta pestaña se dibujó mientras estaba oculta (display:none), el
+      // offset sticky del 2o header quedó con el valor de respaldo del CSS
+      // — al mostrarse recién se puede medir la altura real.
+      if (e.detail.tab !== "tabla") return;
+      const table = tableWrap.querySelector("table.matrix");
+      if (table) syncSubHeaderStickyOffset(table);
+    });
     try {
-      // window.__EMBEDDED_DATA__ permite generar un .html standalone (datos
-      // incrustados) que abre directo por doble clic, sin servidor — mismo
-      // mecanismo que mi-vista.js. En el sitio normal esta variable no
-      // existe y se hace fetch como siempre.
-      if (window.__EMBEDDED_DATA__) {
-        state.data = window.__EMBEDDED_DATA__;
-      } else {
-        const res = await fetch("data/indicadores.json", { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        state.data = await res.json();
-      }
-      state.combined = buildCombinedData(state.data.weekly, state.data.ytd);
+      const loaded = await loadCombinedData();
+      state.data = loaded.data;
+      state.combined = loaded.combined;
       updatedAtEl.textContent = formatUpdatedAt(state.data.generated_at);
       resetCollapsedDefault();
       populateFilterOptions();
@@ -98,16 +97,6 @@
       });
       populateFilterOptions();
       render();
-    });
-
-    const themeToggle = document.getElementById("theme-toggle");
-    const saved = safeGet("gdd-theme");
-    if (saved) document.documentElement.setAttribute("data-theme", saved);
-    themeToggle.addEventListener("click", () => {
-      const current = document.documentElement.getAttribute("data-theme");
-      const next = current === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      safeSet("gdd-theme", next);
     });
   }
 

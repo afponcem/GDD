@@ -13,35 +13,64 @@
       <h1>Indicadores de Gestión GDD</h1>
       <p id="updated-at" class="muted">Cargando datos…</p>
     </div>
-    <nav class="page-nav" aria-label="Páginas">
-      <a class="page-nav-link active" href="index.html">Tabla completa</a>
-      <a class="page-nav-link" href="mi-vista.html">Mi vista</a>
-    </nav>
+    <div class="tab-switch" role="tablist" aria-label="Vistas">
+      <button class="tab-btn active" data-tab="tabla" role="tab" aria-selected="true">Tabla completa</button>
+      <button class="tab-btn" data-tab="mivista" role="tab" aria-selected="false">Mi vista</button>
+    </div>
     <div class="topbar-controls">
       <button id="theme-toggle" class="icon-btn" title="Cambiar tema" aria-label="Cambiar tema claro/oscuro">◐</button>
     </div>
   </header>
 
-  <div class="toolbar">
-    <div class="filters" id="filters-container">
-      <!-- Los 4 dropdowns (Territorio/Subgerencia/Agencia/Jefatura) se arman en JS: buildFilterDropdown() -->
-      <button id="clear-filters" class="icon-btn text-btn" title="Limpiar todos los filtros">Limpiar todo</button>
+  <!-- ===== Pestaña: Tabla completa ===== -->
+  <section class="tab-panel" data-tab-panel="tabla">
+    <div class="toolbar">
+      <div class="filters" id="filters-container">
+        <!-- Los 4 dropdowns (Territorio/Subgerencia/Agencia/Jefatura) se arman en JS: buildFilterDropdown() -->
+        <button id="clear-filters" class="icon-btn text-btn" title="Limpiar todos los filtros">Limpiar todo</button>
+      </div>
+      <input id="indicator-search" type="search" placeholder="Buscar indicador…" aria-label="Buscar indicador">
     </div>
-    <input id="indicator-search" type="search" placeholder="Buscar indicador…" aria-label="Buscar indicador">
-  </div>
-  <div class="active-filters" id="active-filters" aria-live="polite"></div>
-  <div class="legend-bar">
-    <span class="legend-item"><span class="status-dot good"></span> ✓ Cumple</span>
-    <span class="legend-item"><span class="status-dot warning"></span> ! Alerta</span>
-    <span class="legend-item"><span class="status-dot critical"></span> ✕ Bajo meta</span>
-    <span class="legend-item"><span class="status-dot neutral"></span> Sin meta / sin dato</span>
-  </div>
+    <div class="active-filters" id="active-filters" aria-live="polite"></div>
+    <div class="legend-bar">
+      <span class="legend-item"><span class="status-dot good"></span> ✓ Cumple</span>
+      <span class="legend-item"><span class="status-dot warning"></span> ! Alerta</span>
+      <span class="legend-item"><span class="status-dot critical"></span> ✕ Bajo meta</span>
+      <span class="legend-item"><span class="status-dot neutral"></span> Sin meta / sin dato</span>
+    </div>
 
-  <main id="table-wrap" class="table-wrap">
-    <p class="muted" id="status-msg">Cargando indicadores…</p>
-  </main>
+    <main id="table-wrap" class="table-wrap">
+      <p class="muted" id="status-msg">Cargando indicadores…</p>
+    </main>
+  </section>
+
+  <!-- ===== Pestaña: Mi vista ===== -->
+  <section class="tab-panel" data-tab-panel="mivista" hidden>
+    <div class="picker-bar">
+      <div class="entity-picker">
+        <label for="entity-search">Buscar mi territorio, subgerencia, agencia o jefatura</label>
+        <input id="entity-search" type="search" placeholder="Escribe tu nombre o el de tu equipo…" autocomplete="off">
+        <div id="entity-results" class="entity-results" hidden></div>
+      </div>
+      <div id="entity-selected" class="entity-selected" hidden>
+        <div>
+          <p class="muted" id="entity-breadcrumb"></p>
+          <p id="entity-title"></p>
+        </div>
+        <button id="entity-change" class="icon-btn text-btn">Cambiar</button>
+      </div>
+    </div>
+
+    <div id="status-summary" class="status-summary" hidden></div>
+
+    <main id="my-view" class="my-view">
+      <p class="muted" id="status-msg-mivista">Cargando indicadores…</p>
+    </main>
+  </section>
 </div>
 <script src="shared.js"></script>
+<script src="tabs.js"></script>
 <script src="app.js"></script>
+<script src="mi-vista.js"></script>
 </body>
 </html>

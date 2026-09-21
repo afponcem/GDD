@@ -2,7 +2,7 @@
   "use strict";
 
   const {
-    buildCombinedData,
+    loadCombinedData,
     levelLabel,
     formatUpdatedAt,
     computeStatus,
@@ -10,6 +10,7 @@
     escapeHtml,
     safeGet,
     safeSet,
+    initThemeToggle,
   } = window.GDD;
 
   const STORAGE_KEY = "gdd-my-entity-code";
@@ -34,19 +35,11 @@
 
   async function init() {
     bindControls();
+    initThemeToggle();
     try {
-      // window.__EMBEDDED_DATA__ permite generar un .html standalone (datos
-      // incrustados) que abre directo por doble clic, sin servidor — usado
-      // para compartir una copia puntual fuera de GitHub Pages. En el sitio
-      // normal esta variable no existe y se hace fetch como siempre.
-      if (window.__EMBEDDED_DATA__) {
-        state.data = window.__EMBEDDED_DATA__;
-      } else {
-        const res = await fetch("data/indicadores.json", { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        state.data = await res.json();
-      }
-      state.combined = buildCombinedData(state.data.weekly, state.data.ytd);
+      const loaded = await loadCombinedData();
+      state.data = loaded.data;
+      state.combined = loaded.combined;
       state.entityIndex = flattenEntities(state.combined.hierarchy);
       updatedAtEl.textContent = formatUpdatedAt(state.data.generated_at);
 
@@ -86,16 +79,6 @@
     });
 
     document.getElementById("entity-change").addEventListener("click", showPicker);
-
-    const themeToggle = document.getElementById("theme-toggle");
-    const saved = safeGet("gdd-theme");
-    if (saved) document.documentElement.setAttribute("data-theme", saved);
-    themeToggle.addEventListener("click", () => {
-      const current = document.documentElement.getAttribute("data-theme");
-      const next = current === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      safeSet("gdd-theme", next);
-    });
   }
 
   function showPicker() {
