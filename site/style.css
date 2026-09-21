@@ -796,3 +796,124 @@ col.hidden-col, th.hidden-col, td.hidden-col { display: none; }
 }
 
 #status-msg { padding: 20px 0; }
+
+/* ===== Ranking ===================================================== */
+
+.ranking-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented-btn {
+  padding: 7px 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  border: none;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.segmented-btn:first-child { border-left: none; }
+
+.segmented-btn:hover { color: var(--text-primary); }
+
+.segmented-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ranking-formula {
+  padding: 0 20px 10px;
+}
+
+#ranking-scope-select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+table.ranking {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  min-width: 100%;
+}
+
+table.ranking th, table.ranking td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--gridline);
+  white-space: nowrap;
+}
+
+table.ranking thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 11px;
+  text-align: right;
+  vertical-align: bottom;
+  border-bottom: 1px solid var(--baseline);
+}
+
+table.ranking th.rank-col,
+table.ranking td.rank-col {
+  text-align: center;
+  width: 40px;
+}
+
+table.ranking th.entity-col,
+table.ranking td.entity-col {
+  text-align: left;
+  position: static;
+}
+
+table.ranking td.entity-name { font-weight: 600; }
+table.ranking td.entity-territorio { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+
+table.ranking td.score-cell {
+  font-weight: 700;
+}
+
+table.ranking tbody tr:nth-child(even) td {
+  background: var(--row-zebra);
+}
+table.ranking tbody tr:hover td {
+  background: var(--row-hover);
+}
+
+table.ranking tbody tr.rank-top3 td.rank-col {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ranking-missing {
+  margin: 16px 20px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--gridline);
+}
+
+.ranking-missing summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+}

@@ -16,6 +16,7 @@
     <div class="tab-switch" role="tablist" aria-label="Vistas">
       <button class="tab-btn active" data-tab="tabla" role="tab" aria-selected="true">Tabla completa</button>
       <button class="tab-btn" data-tab="mivista" role="tab" aria-selected="false">Mi vista</button>
+      <button class="tab-btn" data-tab="ranking" role="tab" aria-selected="false">Ranking</button>
     </div>
     <div class="topbar-controls">
       <button id="theme-toggle" class="icon-btn" title="Cambiar tema" aria-label="Cambiar tema claro/oscuro">◐</button>
@@ -71,10 +72,36 @@
       <p class="muted" id="status-msg-mivista">Cargando indicadores…</p>
     </main>
   </section>
+
+  <!-- ===== Pestaña: Ranking ===== -->
+  <section class="tab-panel" data-tab-panel="ranking" hidden>
+    <div class="ranking-toolbar">
+      <div class="segmented" id="ranking-level-switch" role="group" aria-label="Nivel">
+        <button type="button" class="segmented-btn" data-level="territorio">Territorio</button>
+        <button type="button" class="segmented-btn" data-level="subgerencia">Subgerencia</button>
+        <button type="button" class="segmented-btn" data-level="agencia">Agencia</button>
+      </div>
+      <div class="segmented" id="ranking-period-switch" role="group" aria-label="Período">
+        <button type="button" class="segmented-btn" data-period="mtd">Mes cerrado</button>
+        <button type="button" class="segmented-btn" data-period="ytd">YTD</button>
+      </div>
+      <div class="filters" id="ranking-scope-container">
+        <!-- Filtro opcional de Territorio (para acotar Subgerencia/Agencia) se arma en JS -->
+      </div>
+    </div>
+    <p class="muted ranking-formula">
+      Puntaje = promedio ponderado de Captación, NPS, Fuga (Desafiliación) y Accidentabilidad Total, 25% cada una,
+      sobre su avance vs. meta.
+    </p>
+    <main id="ranking-wrap" class="table-wrap">
+      <p class="muted" id="status-msg-ranking">Cargando indicadores…</p>
+    </main>
+  </section>
 </div>
 <script src="shared.js"></script>
 <script src="tabs.js"></script>
 <script src="app.js"></script>
 <script src="mi-vista.js"></script>
+<script src="ranking.js"></script>
 </body>
 </html>
