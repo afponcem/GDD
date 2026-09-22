@@ -860,6 +860,7 @@ table.ranking th, table.ranking td {
   padding: 8px 10px;
   border-bottom: 1px solid var(--gridline);
   white-space: nowrap;
+  text-align: right;
 }
 
 table.ranking thead th {
