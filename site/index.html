@@ -30,6 +30,15 @@
         <!-- Los 4 dropdowns (Territorio/Subgerencia/Agencia/Jefatura) se arman en JS: buildFilterDropdown() -->
         <button id="clear-filters" class="icon-btn text-btn" title="Limpiar todos los filtros">Limpiar todo</button>
       </div>
+      <div class="detail-level" id="detail-level-switch" role="group" aria-label="Nivel de detalle máximo">
+        <span class="detail-level-label">Ver hasta:</span>
+        <div class="segmented">
+          <button type="button" class="segmented-btn" data-max-level="territorio">Territorio</button>
+          <button type="button" class="segmented-btn" data-max-level="subgerencia">Subgerencia</button>
+          <button type="button" class="segmented-btn" data-max-level="agencia">Agencia</button>
+          <button type="button" class="segmented-btn" data-max-level="jefatura">Jefatura</button>
+        </div>
+      </div>
       <input id="indicator-search" type="search" placeholder="Buscar indicador…" aria-label="Buscar indicador">
     </div>
     <div class="active-filters" id="active-filters" aria-live="polite"></div>

@@ -12,9 +12,16 @@
     formatPercent,
     valueCellMarkup,
     escapeHtml,
+    safeGet,
+    safeSet,
     initThemeToggle,
     createChecklistDropdown,
   } = window.GDD;
+
+  // Para el tope de "Ver hasta": qué tan profundo puede bajar la tabla,
+  // como índice en la jerarquía real (usado también para comparar niveles).
+  const LEVEL_ORDER = ["total", "territorio", "subgerencia", "agencia", "jefatura"];
+  const MAX_LEVEL_STORAGE_KEY = "gdd-max-level";
 
   // Dimensiones "de entidad" (filtran filas, en cascada Territorio ->
   // Subgerencia -> Agencia -> Jefatura). "foco" filtra columnas de
@@ -47,6 +54,15 @@
     // opciones de Subgerencia/Agencia/Jefatura, Subgerencia acota
     // Agencia/Jefatura, etc. "foco" no tiene cascada (lista fija).
     filters: { territorio: [], subgerencia: [], agencia: [], jefatura: [], foco: [] },
+    // Tope de profundidad ("Ver hasta:") — independiente del colapsado
+    // manual. Nace en "agencia" (no "jefatura") porque filtrar por
+    // Territorio/Subgerencia sin acotar más hace que TODOS los nodos de
+    // ahí para abajo "calcen" con el filtro (nodeMatchesFilters no exige
+    // nada más específico) y el árbol se expande solo hasta el último jefe
+    // — mucho más detalle del que alguien mirando un Territorio/Subgerencia
+    // completo suele querer de entrada. Sigue siendo ajustable a Jefatura
+    // cuando sí hace falta ese detalle.
+    maxLevel: LEVEL_ORDER.includes(safeGet(MAX_LEVEL_STORAGE_KEY)) ? safeGet(MAX_LEVEL_STORAGE_KEY) : "agencia",
   };
 
   // Última lista de nodos disponibles (ya podada por la cascada) por dimensión,
@@ -124,6 +140,18 @@
       });
       populateFilterOptions();
       render();
+    });
+
+    const maxLevelSwitch = document.getElementById("detail-level-switch");
+    const maxLevelButtons = maxLevelSwitch.querySelectorAll(".segmented-btn");
+    maxLevelButtons.forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.maxLevel === state.maxLevel);
+      btn.addEventListener("click", () => {
+        state.maxLevel = btn.dataset.maxLevel;
+        safeSet(MAX_LEVEL_STORAGE_KEY, state.maxLevel);
+        maxLevelButtons.forEach((b) => b.classList.toggle("active", b === btn));
+        render();
+      });
     });
   }
 
@@ -256,15 +284,35 @@
     });
   }
 
+  // El tope de "Ver hasta:" sube solo (nunca baja) cuando hay un filtro
+  // activo más específico que el tope elegido: si alguien filtra por una
+  // Jefatura puntual con "Ver hasta: Agencia" puesto, lo lógico es que esa
+  // Jefatura igual aparezca (la pidió explícitamente por nombre) en vez de
+  // que el tope se la esconda sin avisar.
+  function effectiveMaxLevel() {
+    let idx = LEVEL_ORDER.indexOf(state.maxLevel);
+    if (state.filters.jefatura.length) idx = Math.max(idx, LEVEL_ORDER.indexOf("jefatura"));
+    else if (state.filters.agencia.length) idx = Math.max(idx, LEVEL_ORDER.indexOf("agencia"));
+    else if (state.filters.subgerencia.length) idx = Math.max(idx, LEVEL_ORDER.indexOf("subgerencia"));
+    return LEVEL_ORDER[idx];
+  }
+
   function buildVisibleRows(root) {
     const filtering = hasActiveFilter();
+    const maxLevelIdx = LEVEL_ORDER.indexOf(effectiveMaxLevel());
 
     if (!filtering) {
-      // Sin filtros: respeta el estado de colapsado (drill-down manual).
+      // Sin filtros: respeta el estado de colapsado (drill-down manual), y
+      // además nunca baja del tope de "Ver hasta:".
       const out = [];
       const step = (node, depth) => {
         out.push({ node, depth });
-        if (node.children && node.children.length && !state.collapsed.has(node.code)) {
+        if (
+          node.children &&
+          node.children.length &&
+          !state.collapsed.has(node.code) &&
+          LEVEL_ORDER.indexOf(node.level) < maxLevelIdx
+        ) {
           node.children.forEach((child) => step(child, depth + 1));
         }
       };
@@ -273,7 +321,8 @@
     }
 
     // Con filtros activos: se ignora el colapso, se muestran los nodos que
-    // calzan más toda la cadena de ancestros para dar contexto.
+    // calzan más toda la cadena de ancestros para dar contexto — pero nunca
+    // más profundo que el tope (ver comentario de effectiveMaxLevel).
     const all = [];
     const parentOf = new Map();
     walkTree(root, (node, depth, path, parent) => {
@@ -283,7 +332,7 @@
 
     const visible = new Set();
     all.forEach(({ node, path }) => {
-      if (nodeMatchesFilters(node, path)) {
+      if (LEVEL_ORDER.indexOf(node.level) <= maxLevelIdx && nodeMatchesFilters(node, path)) {
         visible.add(node);
         let cursor = parentOf.get(node);
         while (cursor) {
@@ -374,6 +423,7 @@
 
   function buildBody(rows, indicators) {
     const tbody = document.createElement("tbody");
+    const maxLevelIdx = LEVEL_ORDER.indexOf(effectiveMaxLevel());
 
     rows.forEach(({ node, depth }) => {
       const tr = document.createElement("tr");
@@ -383,7 +433,11 @@
       entityTd.className = "entity-col";
       entityTd.title = `${levelLabel(node)}: ${node.name}`;
 
-      if (node.children && node.children.length) {
+      // Sin flecha de expandir en el propio tope de "Ver hasta:" — no hay
+      // nada que revelar debajo (quedaría cortado por el mismo tope), así
+      // que mostrarla sería un botón que aparenta hacer algo y no hace nada.
+      const canExpand = node.children && node.children.length && LEVEL_ORDER.indexOf(node.level) < maxLevelIdx;
+      if (canExpand) {
         const toggle = document.createElement("button");
         toggle.className = "entity-toggle";
         toggle.setAttribute("aria-label", "Expandir/colapsar");

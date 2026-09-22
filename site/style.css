@@ -199,6 +199,18 @@ body {
   flex-wrap: wrap;
 }
 
+.detail-level {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-level-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* --- Dropdown de filtro multi-select tipo checklist --- */
 .filter-dropdown {
   position: relative;
