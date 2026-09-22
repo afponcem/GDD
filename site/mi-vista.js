@@ -39,7 +39,6 @@
     combined: null,
     entityIndex: [], // lista plana {code, name, level, breadcrumb, node, path}
     selected: null, // entrada de entityIndex actualmente elegida
-    picking: true, // true mientras el buscador de entidad está "en juego" (showPicker), false tras elegir una
     focoFilter: [], // focos elegidos (vacío = todos) — filtra las tarjetas, no la entidad
     entityFilters: { territorio: [], subgerencia: [], agencia: [], jefatura: [] },
   };
@@ -168,20 +167,19 @@
   }
 
   // Reaplica el filtro de entidad a la lista de resultados con el texto de
-  // búsqueda actual. Solo la muestra si el buscador de entidad sigue "en
-  // juego" (showPicker, todavía sin elegir) — si ya hay una entidad elegida
-  // y el usuario solo está tocando los filtros sin querer reabrir el
-  // buscador, forzar el overlay encima de las tarjetas sería una sorpresa
-  // desagradable, no una ayuda.
+  // búsqueda actual — igual que el buscador de texto (bindControls, más
+  // abajo): un filtro de Territorio/Subgerencia/Agencia/Jefatura es otra
+  // forma de acotar la MISMA lista, así que debe reaccionar igual de
+  // inmediato, haya o no una entidad ya elegida (si no, tocar el filtro
+  // para buscar una entidad distinta a la actual no hace nada visible, y
+  // parece que el filtro "no funciona").
   function refreshEntityResults() {
-    if (!state.picking) return;
     renderResults(searchInput.value.trim().toLowerCase());
-    resultsEl.hidden = false;
   }
 
   function bindControls() {
-    searchInput.addEventListener("input", () => renderResults(searchInput.value.trim().toLowerCase()));
-    searchInput.addEventListener("focus", () => renderResults(searchInput.value.trim().toLowerCase()));
+    searchInput.addEventListener("input", refreshEntityResults);
+    searchInput.addEventListener("focus", refreshEntityResults);
     document.addEventListener("click", (e) => {
       if (!e.target.closest(".entity-picker")) resultsEl.hidden = true;
     });
@@ -209,7 +207,6 @@
   }
 
   function showPicker() {
-    state.picking = true;
     selectedBar.hidden = true;
     myView.innerHTML = `<p class="muted">Busca tu territorio, subgerencia, agencia o nombre arriba para ver tus indicadores.</p>`;
     summaryEl.hidden = true;
@@ -261,9 +258,12 @@
 
   function selectEntity(entry) {
     state.selected = entry;
-    state.picking = false;
     safeSet(STORAGE_KEY, entry.code);
     resultsEl.hidden = true;
+    // Si el texto de búsqueda quedara puesto, un filtro tocado más tarde
+    // (sin volver a escribir nada) se combinaría con ese texto viejo y
+    // devolvería "sin resultados" incluso con el filtro bien aplicado.
+    searchInput.value = "";
 
     selectedBar.hidden = false;
     // Un Territorio no tiene ancestros que mostrar (breadcrumb vacío) — eso
