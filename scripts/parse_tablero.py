@@ -234,11 +234,19 @@ def _find_closed_month_blocks(ws, valid_keys):
 
 
 def build_closed_month_values(wb, indicator_keys):
-    """Devuelve {código_entidad: {indicador_key: razón REAL/META}} con el
-    resultado del ÚLTIMO MES CERRADO (no el acumulado YTD, ni el avance de
-    la semana en curso) para cada indicador presente en la hoja cruda "YTD".
+    """Devuelve {código_entidad: {indicador_key: valor}} con el resultado
+    del ÚLTIMO MES CERRADO (no el acumulado YTD, ni el avance de la semana
+    en curso) para cada indicador presente en la hoja cruda "YTD".
     `indicator_keys` es el conjunto de keys ya conocidas (de "Resumen
-    Semanal"/"Resumen Cump YTD"), usado para validar el cruce de nombres."""
+    Semanal"/"Resumen Cump YTD"), usado para validar el cruce de nombres.
+
+    El valor se toma de la fila CUMP (no se recalcula REAL/META a mano):
+    para la mayoría de los indicadores CUMP == REAL/META, pero para otros
+    —ej. Desafiliación— la planilla usa una fórmula propia del negocio
+    (ahí, 2 - REAL/META, para que un REAL más bajo que la meta puntúe
+    "mejor"); confiar en CUMP evita reinventar esa fórmula indicador por
+    indicador y queda consistente con cómo "Resumen Semanal"/"Resumen Cump
+    YTD" ya entregan la razón pre-calculada en vez de REAL/META crudos."""
     if RAW_YTD_SHEET not in wb.sheetnames:
         return {}
     ws = wb[RAW_YTD_SHEET]
@@ -250,14 +258,14 @@ def build_closed_month_values(wb, indicator_keys):
     for r in range(1, ws.max_row + 1):
         if ws.cell(row=r, column=RAW_YTD_ROW_TYPE_COL).value != "REAL":
             continue
-        # La fila META se asume siempre inmediatamente debajo de la REAL —
-        # se confirma leyendo su propia etiqueta en vez de asumirlo a
-        # ciegas, para no leer silenciosamente el REAL de la entidad
-        # siguiente como si fuera el META de esta si algún bloque llegara a
-        # faltarle la fila META (la planilla se edita a mano semana a
-        # semana).
+        # META y CUMP se asumen siempre en las 2 filas siguientes a REAL —
+        # se confirma leyendo sus propias etiquetas en vez de asumirlo a
+        # ciegas, para no leer silenciosamente la fila de la entidad
+        # siguiente si algún bloque llegara a faltarle una fila (la
+        # planilla se edita a mano semana a semana).
         if ws.cell(row=r + 1, column=RAW_YTD_ROW_TYPE_COL).value != "META":
             continue
+        has_cump_row = ws.cell(row=r + 2, column=RAW_YTD_ROW_TYPE_COL).value == "CUMP"
         code = ws.cell(row=r, column=RAW_YTD_FLAT_CODE_COL).value
         if not code:
             continue
@@ -268,14 +276,30 @@ def build_closed_month_values(wb, indicator_keys):
             if not isinstance(real, (int, float)):
                 continue
             meta = ws.cell(row=r + 1, column=month_col).value  # fila META, justo debajo de REAL
-            if isinstance(meta, (int, float)) and meta != 0:
-                entity_values[key] = real / meta
-            else:
+            if not (isinstance(meta, (int, float)) and meta != 0):
                 # Indicador "(Valor Real)" sin meta numérica (ej. un conteo
                 # como Accidentes CTP) — igual que en "Resumen Semanal"/
                 # "Resumen Cump YTD", se guarda el valor crudo tal cual, sin
                 # dividir.
                 entity_values[key] = real
+                continue
+            if has_cump_row:
+                # Hay fila CUMP para esta entidad: es la única fuente
+                # confiable de la razón (puede traer una fórmula propia del
+                # indicador, ver docstring). Si para este mes puntual viniera
+                # vacía o no numérica, se omite en vez de recalcular
+                # REAL/META a ciegas — para un indicador con fórmula
+                # invertida eso daría un número con el signo de negocio al
+                # revés, silenciosamente.
+                cump = ws.cell(row=r + 2, column=month_col).value
+                if isinstance(cump, (int, float)):
+                    entity_values[key] = cump
+            else:
+                # Esta entidad no tiene fila CUMP en absoluto (estructura
+                # distinta a REAL/META/CUMP) — no hay fórmula de negocio que
+                # preferir, así que REAL/META es la mejor aproximación
+                # disponible.
+                entity_values[key] = real / meta
 
     return results
 

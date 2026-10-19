@@ -279,8 +279,12 @@ def build_closed_month_fixture(wb):
     ws.cell(row=4, column=MONTH2, value=100)
     ws.cell(row=4, column=MONTH3, value=100)
 
-    # Entidad T001: REAL/META en filas 20/21 (lejos del TOTAL, en cualquier
-    # parte de la hoja — el parser no debe asumir una posición relativa)
+    # Entidad T001: REAL/META/CUMP en filas 20/21/22 (lejos del TOTAL, en
+    # cualquier parte de la hoja — el parser no debe asumir una posición
+    # relativa). CUMP trae a propósito un valor que NO es REAL/META (acá
+    # 1.2, no 40/50=0.8) para probar que el parser usa el CUMP de la
+    # planilla — que puede traer una fórmula propia del indicador, como el
+    # "2 - REAL/META" real de Desafiliación — en vez de recalcularlo.
     ws.cell(row=20, column=4, value="T001")
     ws.cell(row=20, column=8, value="REAL")
     ws.cell(row=20, column=MONTH2, value=40)
@@ -288,6 +292,27 @@ def build_closed_month_fixture(wb):
     ws.cell(row=21, column=4, value="T001")
     ws.cell(row=21, column=8, value="META")
     ws.cell(row=21, column=MONTH2, value=50)
+
+    ws.cell(row=22, column=3, value="T001")
+    ws.cell(row=22, column=8, value="CUMP")
+    ws.cell(row=22, column=MONTH2, value=1.2)
+
+    # Entidad T002: tiene fila CUMP (misma estructura que T001) pero, para
+    # el mes cerrado puntual, esa celda viene vacía (ej. una edición manual
+    # a medio terminar) — debe omitirse (quedar sin valor para ese
+    # indicador) en vez de recalcular REAL/META "a ciegas", que para un
+    # indicador con fórmula invertida daría el signo de negocio al revés.
+    ws.cell(row=24, column=4, value="T002")
+    ws.cell(row=24, column=8, value="REAL")
+    ws.cell(row=24, column=MONTH2, value=40)
+
+    ws.cell(row=25, column=4, value="T002")
+    ws.cell(row=25, column=8, value="META")
+    ws.cell(row=25, column=MONTH2, value=50)
+
+    ws.cell(row=26, column=3, value="T002")
+    ws.cell(row=26, column=8, value="CUMP")
+    # (celda de CUMP para MONTH2 deliberadamente sin valor)
 
     return ws
 
@@ -300,12 +325,18 @@ def test_closed_month_skips_in_progress_month_and_finds_total_row_dynamically():
     closed = build_closed_month_values(wb, {"captacion_total"})
 
     # El mes en curso (202503, REAL=0 para TOTAL RED ACHS) se descarta —
-    # el mes cerrado detectado es 202502, así que T001 usa esa columna.
-    assert closed["T001"]["captacion_total"] == 40 / 50
+    # el mes cerrado detectado es 202502. T001 trae fila CUMP con un valor
+    # (1.2) DISTINTO de REAL/META (40/50=0.8): debe ganar el de la
+    # planilla, no el recalculado a mano.
+    assert closed["T001"]["captacion_total"] == 1.2
 
     tree = {"code": "T001", "level": "agencia", "values": {}, "children": []}
     apply_closed_month_values(tree, closed)
-    assert tree["values_closed_month"]["captacion_total"] == 0.8
+    assert tree["values_closed_month"]["captacion_total"] == 1.2
+
+    # T002 tiene fila CUMP pero vacía para el mes cerrado -> se omite en vez
+    # de recalcular REAL/META a ciegas (no debe aparecer la key siquiera).
+    assert "captacion_total" not in closed.get("T002", {})
 
     # Entidad sin match -> diccionario vacío, no una excepción ni un 0 inventado.
     other = {"code": "SIN_DATOS", "level": "agencia", "values": {}, "children": []}
