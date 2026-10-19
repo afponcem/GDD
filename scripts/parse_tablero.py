@@ -316,6 +316,33 @@ def apply_closed_month_values(tree, closed_month_by_code):
     walk(tree)
 
 
+# NPS se calcula como un acumulado móvil de los últimos 4 meses (no como
+# suma del año corrido), así que su "YTD" correcto —mientras no se rehaga el
+# cálculo real del indicador— es, por definición de negocio, el mismo
+# resultado del último mes cerrado: septiembre también cuenta como YTD en
+# ese sentido. Son las únicas keys que se pisan así; cualquier otro
+# indicador nuevo con la misma semántica (ventana móvil, no acumulado real)
+# debería agregarse acá explícitamente, no asumirse.
+YTD_USES_CLOSED_MONTH = {"nps"}
+
+
+def apply_rolling_window_ytd_override(ytd_tree, closed_month_by_code):
+    """Sobrescribe, en el árbol YTD, las keys de YTD_USES_CLOSED_MONTH con
+    el valor del último mes cerrado (ver comentario arriba), por código de
+    entidad. Si esa entidad no tiene valor de mes cerrado para la key,
+    conserva lo que ya traía "Resumen Cump YTD" — nunca lo deja vacío por
+    aplicar este override."""
+    def walk(node):
+        closed = closed_month_by_code.get(node["code"], {})
+        for key in YTD_USES_CLOSED_MONTH:
+            if key in closed:
+                node["values"][key] = closed[key]
+        for child in node.get("children", []):
+            walk(child)
+
+    walk(ytd_tree)
+
+
 def _normalize_for_match(text) -> str:
     """Normaliza un nombre de indicador para cruzarlo entre hojas: saca el
     prefijo numérico ("05. "), tildes, y reemplaza toda la puntuación por
@@ -627,6 +654,7 @@ def parse_workbook(xlsx_path: Path) -> dict:
     # jerarquía completa armada).
     closed_month_by_code = build_closed_month_values(wb, set(all_labels.keys()))
     apply_closed_month_values(result["weekly"]["hierarchy"], closed_month_by_code)
+    apply_rolling_window_ytd_override(result["ytd"]["hierarchy"], closed_month_by_code)
 
     return result
 

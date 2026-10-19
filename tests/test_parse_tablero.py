@@ -14,6 +14,7 @@ import openpyxl
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from parse_tablero import (  # noqa: E402
     apply_closed_month_values,
+    apply_rolling_window_ytd_override,
     build_closed_month_values,
     build_indicator_focos,
     build_jefatura_agencia_tags,
@@ -344,9 +345,44 @@ def test_closed_month_skips_in_progress_month_and_finds_total_row_dynamically():
     assert other["values_closed_month"] == {}
 
 
+def test_nps_ytd_uses_closed_month_but_keeps_other_keys_and_entities_untouched():
+    # NPS es la única key en YTD_USES_CLOSED_MONTH (ventana móvil de 4
+    # meses, no acumulado real) — el override debe pisarla, dejar intacta
+    # cualquier otra key de la misma entidad, y no tocar una entidad sin
+    # dato de mes cerrado para "nps".
+    closed_month_by_code = {
+        "T001": {"nps": 0.95, "captacion_total": 1.2},
+        "T003": {"captacion_total": 0.7},  # sin "nps"
+    }
+    ytd_tree = {
+        "code": "TOTAL",
+        "values": {},
+        "children": [
+            {
+                "code": "T001",
+                "values": {"nps": 0.40, "captacion_total": 0.83},
+                "children": [],
+            },
+            {
+                "code": "T003",
+                "values": {"nps": 0.77, "captacion_total": 0.65},
+                "children": [],
+            },
+        ],
+    }
+
+    apply_rolling_window_ytd_override(ytd_tree, closed_month_by_code)
+
+    t001, t003 = ytd_tree["children"]
+    assert t001["values"]["nps"] == 0.95  # pisado por el mes cerrado
+    assert t001["values"]["captacion_total"] == 0.83  # otra key, intacta
+    assert t003["values"]["nps"] == 0.77  # sin dato de mes cerrado -> conserva el YTD original
+
+
 if __name__ == "__main__":
     test_parses_hierarchy_with_closing_markers_and_agencias()
     test_slugify_handles_accents_and_punctuation()
     test_build_indicator_focos_disambiguates_substring_candidates()
     test_closed_month_skips_in_progress_month_and_finds_total_row_dynamically()
+    test_nps_ytd_uses_closed_month_but_keeps_other_keys_and_entities_untouched()
     print("OK: todos los tests pasaron")
