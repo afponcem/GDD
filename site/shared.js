@@ -43,6 +43,13 @@ window.GDD = (function () {
       level: base.level,
       valuesYtd: (ytdNode && ytdNode.values) || {},
       valuesMtd: (weeklyNode && weeklyNode.values) || {},
+      // Resultado del último mes calendario ya cerrado (ej. septiembre
+      // mientras octubre está en curso) — calculado aparte en el parser
+      // desde la hoja cruda "YTD" (ver build_closed_month_values en
+      // parse_tablero.py), distinto tanto de valuesYtd (acumulado del año)
+      // como de valuesMtd (avance de la semana en curso). Solo vive en el
+      // árbol semanal porque ahí es donde se calculó.
+      valuesClosedMonth: (weeklyNode && weeklyNode.values_closed_month) || {},
       children: [],
     };
 

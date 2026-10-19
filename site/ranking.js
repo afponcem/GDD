@@ -28,7 +28,7 @@
     data: null,
     combined: null,
     level: "territorio",
-    period: "mtd", // "mtd" = Mes cerrado, "ytd" = YTD
+    period: "mtd", // "mtd" = Mes cerrado (último mes calendario cerrado), "ytd" = YTD
     scopeTerritorio: "", // código de Territorio, "" = todos (solo aplica si level != territorio)
     territorios: [], // [{code, name}] para el filtro de alcance
   };
@@ -121,7 +121,10 @@
       if (state.level !== "territorio" && state.scopeTerritorio && path.territorio !== state.scopeTerritorio) {
         return;
       }
-      const values = state.period === "ytd" ? node.valuesYtd : node.valuesMtd;
+      // "Mes cerrado" usa el último mes calendario YA cerrado (ej.
+      // septiembre mientras octubre está en curso), no el avance de la
+      // semana en curso (valuesMtd) — ver valuesClosedMonth en shared.js.
+      const values = state.period === "ytd" ? node.valuesYtd : node.valuesClosedMonth;
       out.push({
         code: node.code,
         name: node.name,

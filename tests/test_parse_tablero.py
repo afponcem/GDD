@@ -13,6 +13,8 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from parse_tablero import (  # noqa: E402
+    apply_closed_month_values,
+    build_closed_month_values,
     build_indicator_focos,
     build_jefatura_agencia_tags,
     nest_agencias,
@@ -245,8 +247,75 @@ def test_build_indicator_focos_disambiguates_substring_candidates():
     assert slugify("Indicador Sin Match En Definiciones") not in focos
 
 
+def build_closed_month_fixture(wb):
+    """Hoja cruda "YTD" con un bloque de meses real: 3 columnas de mes
+    (202501, 202502, 202503) + 1 columna YTD, para un único indicador
+    ("CAPTACIÓN TOTAL"). 202503 queda "sin cerrar" (REAL=0 para TOTAL RED
+    ACHS, igual que en el archivo real cuando el mes está en curso), así que
+    el mes cerrado esperado es 202502, no el último de la fila.
+
+    La fila de TOTAL RED ACHS se pone deliberadamente en una fila que NO es
+    la 6 (acá, la 3) para probar que _find_total_red_achs_row la busca en
+    vez de asumirla fija."""
+    ws = wb.create_sheet("YTD")
+    MONTH1, MONTH2, MONTH3, YTD_COL = 9, 10, 11, 12  # cols I, J, K, L
+
+    ws.cell(row=5, column=MONTH1, value=202501)
+    ws.cell(row=5, column=MONTH2, value=202502)
+    ws.cell(row=5, column=MONTH3, value=202503)
+    ws.cell(row=5, column=YTD_COL, value="YTD")
+    ws.cell(row=4, column=YTD_COL, value="CAPTACIÓN TOTALYTD")  # sufijo pegado, igual que en el archivo real
+
+    # TOTAL RED ACHS: REAL en fila 3, META en fila 4 (justo debajo)
+    ws.cell(row=3, column=4, value="TOTAL RED ACHS")
+    ws.cell(row=3, column=8, value="REAL")
+    ws.cell(row=3, column=MONTH1, value=100)
+    ws.cell(row=3, column=MONTH2, value=200)
+    ws.cell(row=3, column=MONTH3, value=0)  # mes en curso, todavía no cierra
+
+    ws.cell(row=4, column=4, value="TOTAL RED ACHS")
+    ws.cell(row=4, column=8, value="META")
+    ws.cell(row=4, column=MONTH1, value=50)
+    ws.cell(row=4, column=MONTH2, value=100)
+    ws.cell(row=4, column=MONTH3, value=100)
+
+    # Entidad T001: REAL/META en filas 20/21 (lejos del TOTAL, en cualquier
+    # parte de la hoja — el parser no debe asumir una posición relativa)
+    ws.cell(row=20, column=4, value="T001")
+    ws.cell(row=20, column=8, value="REAL")
+    ws.cell(row=20, column=MONTH2, value=40)
+
+    ws.cell(row=21, column=4, value="T001")
+    ws.cell(row=21, column=8, value="META")
+    ws.cell(row=21, column=MONTH2, value=50)
+
+    return ws
+
+
+def test_closed_month_skips_in_progress_month_and_finds_total_row_dynamically():
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    build_closed_month_fixture(wb)
+
+    closed = build_closed_month_values(wb, {"captacion_total"})
+
+    # El mes en curso (202503, REAL=0 para TOTAL RED ACHS) se descarta —
+    # el mes cerrado detectado es 202502, así que T001 usa esa columna.
+    assert closed["T001"]["captacion_total"] == 40 / 50
+
+    tree = {"code": "T001", "level": "agencia", "values": {}, "children": []}
+    apply_closed_month_values(tree, closed)
+    assert tree["values_closed_month"]["captacion_total"] == 0.8
+
+    # Entidad sin match -> diccionario vacío, no una excepción ni un 0 inventado.
+    other = {"code": "SIN_DATOS", "level": "agencia", "values": {}, "children": []}
+    apply_closed_month_values(other, closed)
+    assert other["values_closed_month"] == {}
+
+
 if __name__ == "__main__":
     test_parses_hierarchy_with_closing_markers_and_agencias()
     test_slugify_handles_accents_and_punctuation()
     test_build_indicator_focos_disambiguates_substring_candidates()
+    test_closed_month_skips_in_progress_month_and_finds_total_row_dynamically()
     print("OK: todos los tests pasaron")

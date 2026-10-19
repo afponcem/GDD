@@ -74,6 +74,23 @@ RAW_YTD_CODE_COL = 4    # columna D: código de persona (o de agencia, en sus fi
 RAW_YTD_AGENCIA_COL = 6  # columna F: nombre de agencia (solo presente en alguna de las 3 filas REAL/META/CUMP de la persona)
 RAW_YTD_LABEL_COL = 8    # columna H: "REAL" / "META" / "CUMP"
 
+# La misma hoja cruda "YTD" trae, para cada indicador, una matriz de una
+# columna por mes (header fila 5 = "YYYYMM", fila 3 = "CIERRE") que termina
+# en una columna "<Indicador>YTD" (fila 4 = nombre canónico, fila 5 = "YTD",
+# con fórmula =SUM() de todo el bloque de meses) seguida de UNA columna más
+# con el avance de la semana en curso (fila 3 = "s1"/"s2"/etc, mismo mes que
+# la última columna del bloque). El mes todavía no cerrado SIEMPRE aparece
+# en el bloque con valor 0 en la fila TOTAL RED ACHS (su avance real vive
+# aparte, en esa columna de "semana en curso") — así que basta con tomar, de
+# derecha a izquierda, la primera columna del bloque con REAL != 0 para
+# TOTAL RED ACHS para encontrar el último mes cerrado, sin necesidad de
+# saber la fecha de hoy ni de asumir qué mes es "el actual".
+RAW_YTD_ROW_TYPE_COL = 8   # columna H: "REAL" / "META" / "CUMP" (igual a RAW_YTD_LABEL_COL)
+RAW_YTD_FLAT_CODE_COL = 4  # columna D: código en las filas REAL/META (no coincide con RAW_YTD_CODE_COL en la fila CUMP, que lo trae en columna C)
+RAW_YTD_HEADER_LABEL_ROW = 4
+RAW_YTD_HEADER_PERIOD_ROW = 5
+RAW_YTD_TOTAL_ROW = 6  # fila "REAL" de TOTAL RED ACHS, usada como referencia para detectar el mes cerrado
+
 # Columnas de "Definiciones Indicadores" usadas para el vínculo Indicador -> Foco.
 DEFINICIONES_SHEET = "Definiciones Indicadores"
 DEFINICIONES_FOCO_COL = 2       # columna B
@@ -155,6 +172,124 @@ def build_jefatura_agencia_tags(wb):
             continue
         tags.setdefault(str(code).strip(), str(tag).strip())
     return tags
+
+
+def _find_total_red_achs_row(ws):
+    """Ubica la fila REAL de "TOTAL RED ACHS" en la hoja cruda "YTD" —
+    buscada en vez de asumida en una fila fija, porque esta hoja se edita a
+    mano semana a semana y una fila insertada/borrada la correría."""
+    for r in range(1, ws.max_row + 1):
+        if ws.cell(row=r, column=RAW_YTD_ROW_TYPE_COL).value != "REAL":
+            continue
+        code = ws.cell(row=r, column=RAW_YTD_FLAT_CODE_COL).value
+        if code and str(code).strip().upper() == "TOTAL RED ACHS":
+            return r
+    return RAW_YTD_TOTAL_ROW  # respaldo si no se encuentra (no debería pasar)
+
+
+def _find_closed_month_blocks(ws, valid_keys):
+    """Ubica, para cada indicador de la hoja cruda "YTD", la columna de su
+    último mes cerrado. Devuelve {indicador_key: columna} (columna 1-based
+    de openpyxl), sin incluir indicadores para los que no se pudo determinar
+    un mes cerrado (ej. el primer mes del bloque, cuando ni siquiera ese
+    cerró todavía).
+
+    El header de esta hoja (fila 4) trae el nombre del indicador pegado al
+    sufijo "YTD" y en mayúsculas distintas a como aparece en "Resumen
+    Semanal"/"Resumen Cump YTD" (ej. "DESAFILIACIÓNYTD" acá vs
+    "Desafiliación" allá) — por eso el cruce se hace slugificando ambos
+    lados (quitando antes el sufijo "YTD") en vez de comparar el texto tal
+    cual, y se valida contra `valid_keys` para no colar una key inventada
+    por un header que calce por casualidad."""
+    total_row = _find_total_red_achs_row(ws)
+    closed_col_by_key = {}
+    for col in range(1, ws.max_column + 1):
+        label = ws.cell(row=RAW_YTD_HEADER_LABEL_ROW, column=col).value
+        period = ws.cell(row=RAW_YTD_HEADER_PERIOD_ROW, column=col).value
+        if not label or period != "YTD":
+            continue
+        key = slugify(re.sub(r"ytd$", "", str(label).strip(), flags=re.IGNORECASE))
+        if key not in valid_keys:
+            continue
+
+        # El bloque de meses son las columnas contiguas a la izquierda cuyo
+        # header de fila 5 es un código "YYYYMM" (entero).
+        block_cols = []
+        c = col - 1
+        while c >= 1:
+            v = ws.cell(row=RAW_YTD_HEADER_PERIOD_ROW, column=c).value
+            if isinstance(v, int) and 200001 <= v <= 299912:
+                block_cols.insert(0, c)
+                c -= 1
+            else:
+                break
+
+        for month_col in reversed(block_cols):
+            total_real = ws.cell(row=total_row, column=month_col).value
+            if isinstance(total_real, (int, float)) and total_real != 0:
+                closed_col_by_key[key] = month_col
+                break
+
+    return closed_col_by_key
+
+
+def build_closed_month_values(wb, indicator_keys):
+    """Devuelve {código_entidad: {indicador_key: razón REAL/META}} con el
+    resultado del ÚLTIMO MES CERRADO (no el acumulado YTD, ni el avance de
+    la semana en curso) para cada indicador presente en la hoja cruda "YTD".
+    `indicator_keys` es el conjunto de keys ya conocidas (de "Resumen
+    Semanal"/"Resumen Cump YTD"), usado para validar el cruce de nombres."""
+    if RAW_YTD_SHEET not in wb.sheetnames:
+        return {}
+    ws = wb[RAW_YTD_SHEET]
+    closed_col_by_key = _find_closed_month_blocks(ws, indicator_keys)
+    if not closed_col_by_key:
+        return {}
+
+    results = {}
+    for r in range(1, ws.max_row + 1):
+        if ws.cell(row=r, column=RAW_YTD_ROW_TYPE_COL).value != "REAL":
+            continue
+        # La fila META se asume siempre inmediatamente debajo de la REAL —
+        # se confirma leyendo su propia etiqueta en vez de asumirlo a
+        # ciegas, para no leer silenciosamente el REAL de la entidad
+        # siguiente como si fuera el META de esta si algún bloque llegara a
+        # faltarle la fila META (la planilla se edita a mano semana a
+        # semana).
+        if ws.cell(row=r + 1, column=RAW_YTD_ROW_TYPE_COL).value != "META":
+            continue
+        code = ws.cell(row=r, column=RAW_YTD_FLAT_CODE_COL).value
+        if not code:
+            continue
+        code = str(code).strip()
+        entity_values = results.setdefault(code, {})
+        for key, month_col in closed_col_by_key.items():
+            real = ws.cell(row=r, column=month_col).value
+            if not isinstance(real, (int, float)):
+                continue
+            meta = ws.cell(row=r + 1, column=month_col).value  # fila META, justo debajo de REAL
+            if isinstance(meta, (int, float)) and meta != 0:
+                entity_values[key] = real / meta
+            else:
+                # Indicador "(Valor Real)" sin meta numérica (ej. un conteo
+                # como Accidentes CTP) — igual que en "Resumen Semanal"/
+                # "Resumen Cump YTD", se guarda el valor crudo tal cual, sin
+                # dividir.
+                entity_values[key] = real
+
+    return results
+
+
+def apply_closed_month_values(tree, closed_month_by_code):
+    """Agrega `values_closed_month` a cada nodo del árbol (por código), con
+    lo que devuelve build_closed_month_values. Nodos sin match quedan con
+    diccionario vacío — no inventa un valor para una entidad sin dato."""
+    def walk(node):
+        node["values_closed_month"] = closed_month_by_code.get(node["code"], {})
+        for child in node.get("children", []):
+            walk(child)
+
+    walk(tree)
 
 
 def _normalize_for_match(text) -> str:
@@ -459,6 +594,15 @@ def parse_workbook(xlsx_path: Path) -> dict:
         for key, meta in indicators.items():
             meta["foco"] = FOCO_OVERRIDES.get(key, focos.get(key))
         result[out_key] = {"hierarchy": tree, "indicators": indicators}
+
+    # "Mes cerrado" (resultado del último mes calendario ya cerrado, ej.
+    # septiembre cuando octubre recién está en curso) es DISTINTO tanto del
+    # acumulado YTD como del avance de la semana en curso ("Resumen
+    # Semanal"/MTD) — se calcula aparte desde la hoja cruda "YTD" y se
+    # cuelga como values_closed_month en el árbol semanal (que ya trae la
+    # jerarquía completa armada).
+    closed_month_by_code = build_closed_month_values(wb, set(all_labels.keys()))
+    apply_closed_month_values(result["weekly"]["hierarchy"], closed_month_by_code)
 
     return result
 
